@@ -1,0 +1,29 @@
+{
+    "$schema": "../node_modules/wrangler/config-schema.json",
+    "name": "vnfam-cms-local",
+    "main": "worker.ts",
+    "compatibility_date": "2026-11-04",
+    "compatibility_flags": ["nodejs_compat"],
+    "assets": {
+        "directory": "../dist-cms",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/cms-api", "/cms-api/*"],
+    },
+    "services": [{ "binding": "DEVICE_API", "service": "vnfam-device-api" }],
+    "vars": {
+        "CMS_ACTOR_ID": "local_module",
+        "CMS_ACTOR_NAME": "Quản trị viên thử nghiệm",
+        "CMS_ORIGIN": "http://127.0.0.1:8788",
+        "CMS_MODE": "local",
+        "CMS_SITE_ID": "site",
+        "CMS_SCOPE_ID": "scope",
+    },
+    "workers_dev": false,
+    "preview_urls": false,
+    "observability": {
+        "enabled": true,
+        "redact_query_string": true,
+        "traces": { "enabled": true },
+    },
+}

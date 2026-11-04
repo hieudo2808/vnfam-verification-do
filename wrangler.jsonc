@@ -1,0 +1,31 @@
+{
+    "$schema": "./node_modules/wrangler/config-schema.json",
+    "name": "vnfam-device-api",
+    "main": "src/index.ts",
+    "compatibility_date": "2026-11-04",
+    "compatibility_flags": ["nodejs_compat"],
+    "upload_source_maps": true,
+    "vars": {
+        "REGISTRATION_SITE_ID": "site",
+        "REGISTRATION_SCOPE_ID": "scope",
+        "REGISTRATION_SCOPE_NAME": "Bảo tàng thử nghiệm",
+    },
+    "d1_databases": [
+        {
+            "binding": "DB",
+            "database_name": "vnfam-local",
+            "database_id": "00000000-0000-0000-0000-000000000001",
+        },
+    ],
+    "r2_buckets": [{ "binding": "FIRMWARE", "bucket_name": "vnfam-firmware-local" }],
+    "observability": {
+        "enabled": true,
+        "redact_query_string": true,
+        "head_sampling_rate": 1,
+        "traces": { "enabled": true, "head_sampling_rate": 1 },
+    },
+    "durable_objects": {
+        "bindings": [{ "name": "DEVICES", "class_name": "DeviceDO" }],
+    },
+    "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceDO"] }],
+}

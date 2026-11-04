@@ -1,0 +1,372 @@
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@theme inline {
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--secondary);
+    --color-accent-foreground: var(--foreground);
+    --color-destructive: var(--destructive);
+    --color-border: var(--border);
+    --color-input: var(--border);
+    --color-ring: var(--primary);
+}
+.vnfam-admin {
+    --background: #fff;
+    --foreground: #20282e;
+    --primary: #195d52;
+    --primary-foreground: #fff;
+    --secondary: #eef2f1;
+    --muted: #f5f6f6;
+    --muted-foreground: #56616a;
+    --destructive: #ad2929;
+    --border: #d5dcdf;
+    --radius: 0.4rem;
+    font-family: system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--foreground);
+    background: #f7f8f8;
+    min-height: 100vh;
+}
+.vnfam-admin * {
+    box-sizing: border-box;
+}
+.vnfam-admin header {
+    height: 68px;
+    background: white;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 28px;
+    gap: 16px;
+}
+.vnfam-admin .brand {
+    font-weight: 750;
+    font-size: 20px;
+    letter-spacing: 0.04em;
+}
+.vnfam-admin .brand span {
+    font-weight: 400;
+    font-size: 14px;
+    letter-spacing: 0;
+    margin-left: 14px;
+    color: var(--muted-foreground);
+}
+.vnfam-admin .actor {
+    font-size: 12px;
+    color: var(--muted-foreground);
+}
+.vnfam-admin .workspace {
+    display: grid;
+    grid-template-columns: 205px minmax(0, 1fr);
+    min-height: calc(100vh - 68px);
+}
+.vnfam-admin aside {
+    padding: 24px 16px;
+    background: white;
+    border-right: 1px solid var(--border);
+}
+.vnfam-admin aside nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.vnfam-admin aside a {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    text-decoration: none;
+    color: var(--muted-foreground);
+    padding: 11px 12px;
+    border-radius: 5px;
+}
+.vnfam-admin aside a.active {
+    background: #e8f1ee;
+    color: var(--primary);
+    font-weight: 650;
+}
+.vnfam-admin .aside-note {
+    margin: 36px 12px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+}
+.vnfam-admin main {
+    padding: 28px;
+    max-width: 1500px;
+    width: 100%;
+    min-width: 0;
+}
+.vnfam-admin h1 {
+    font-size: 26px;
+    line-height: 1.25;
+    letter-spacing: -0.03em;
+    margin: 0 0 12px;
+}
+.vnfam-admin h2 {
+    font-size: 17px;
+    margin: 0 0 16px;
+}
+.vnfam-admin p {
+    margin: 10px 0 16px;
+}
+.vnfam-admin a {
+    color: var(--primary);
+    text-underline-offset: 3px;
+}
+.vnfam-admin a[data-variant="default"] {
+    color: var(--primary-foreground);
+    text-decoration: none;
+}
+.vnfam-admin code {
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+.vnfam-admin td code,
+.vnfam-admin small {
+    display: block;
+    font-size: 12px;
+    color: var(--muted-foreground);
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+}
+.vnfam-admin .heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: flex-start;
+}
+.vnfam-admin section {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 22px;
+    margin: 20px 0;
+}
+.vnfam-admin .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 22px 0;
+}
+.vnfam-admin .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 550;
+}
+.vnfam-admin .filters .field {
+    flex: 1;
+    min-width: 145px;
+    margin: 0;
+}
+.vnfam-admin input,
+.vnfam-admin select,
+.vnfam-admin textarea {
+    font: inherit;
+    color: var(--foreground);
+    background: white;
+    border: 1px solid #b9c3c8;
+    border-radius: 4px;
+    padding: 9px 10px;
+    min-height: 40px;
+    width: 100%;
+}
+.vnfam-admin input:focus-visible,
+.vnfam-admin select:focus-visible,
+.vnfam-admin textarea:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+.vnfam-admin form {
+    max-width: 680px;
+}
+.vnfam-admin button {
+    cursor: pointer;
+}
+.vnfam-admin button:disabled {
+    cursor: default;
+}
+.vnfam-admin .table-wrap {
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: white;
+}
+.vnfam-admin table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 13px;
+}
+.vnfam-admin th {
+    font-size: 12px;
+    font-weight: 650;
+    color: #53616a;
+    background: #f0f3f3;
+}
+.vnfam-admin td,
+.vnfam-admin th {
+    padding: 15px 16px;
+    border-bottom: 1px solid #e5e9eb;
+    vertical-align: top;
+}
+.vnfam-admin tr:last-child td {
+    border: 0;
+}
+.vnfam-admin caption {
+    text-align: left;
+    padding: 12px;
+    font-weight: 600;
+}
+.vnfam-admin .pager,
+.vnfam-admin .actions,
+.vnfam-admin main nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 16px 0;
+}
+.vnfam-admin .pager {
+    justify-content: flex-end;
+}
+.vnfam-admin .actions > div {
+    max-width: 220px;
+}
+.vnfam-admin .problem,
+.vnfam-admin .field-error {
+    color: #912424;
+}
+.vnfam-admin .problem {
+    background: #fff4f3;
+    border-left: 3px solid #ad2929;
+    padding: 12px;
+    margin: 16px 0;
+}
+.vnfam-admin .status-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 16px 0;
+}
+.vnfam-admin .status-strip span {
+    background: #edf1f0;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+.vnfam-admin dl {
+    display: grid;
+    grid-template-columns: minmax(100px, 180px) minmax(0, 1fr);
+    gap: 10px;
+}
+.vnfam-admin dt {
+    color: var(--muted-foreground);
+}
+.vnfam-admin dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+.vnfam-admin .operation {
+    border-left: 3px solid #b8c7c2;
+    padding: 12px 16px;
+    margin: 12px 0;
+    background: #f7f9f8;
+}
+.vnfam-admin .operation code {
+    display: block;
+}
+@media (max-width: 768px) {
+    .vnfam-admin .config-columns {
+        grid-template-columns: 1fr;
+    }
+    .vnfam-admin .workspace {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .vnfam-admin aside {
+        padding: 10px;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+    }
+    .vnfam-admin aside nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 2px;
+    }
+    .vnfam-admin aside a {
+        padding: 7px;
+    }
+    .vnfam-admin .aside-note {
+        display: none;
+    }
+    .vnfam-admin main {
+        padding: 18px 12px;
+    }
+    .vnfam-admin header {
+        padding: 12px;
+        height: auto;
+        flex-wrap: wrap;
+    }
+    .vnfam-admin td,
+    .vnfam-admin th {
+        padding: 10px 8px;
+    }
+    .vnfam-admin .heading {
+        flex-wrap: wrap;
+    }
+    .vnfam-admin dl {
+        grid-template-columns: 1fr;
+    }
+    .vnfam-admin section {
+        padding: 16px;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .vnfam-admin * {
+        animation: none !important;
+        transition: none !important;
+    }
+}
+.vnfam-admin .config-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap: 28px;
+}
+.vnfam-admin .settings-tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+}
+.vnfam-admin .settings-tabs a {
+    padding: 8px 14px;
+    text-decoration: none;
+    border-radius: 4px;
+}
+.vnfam-admin .settings-tabs a.active {
+    background: var(--primary);
+    color: var(--primary-foreground);
+}
+.vnfam-admin .wifi-networks {
+    display: grid;
+    gap: 8px;
+    margin: 12px 0;
+}
+.vnfam-admin .wifi-networks button {
+    justify-content: space-between;
+    white-space: normal;
+    height: auto;
+    min-height: 40px;
+    flex-wrap: wrap;
+}

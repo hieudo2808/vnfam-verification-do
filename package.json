@@ -1,0 +1,59 @@
+{
+    "name": "vnfam-device-api",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "packageManager": "bun@1.4.4",
+    "engines": {
+        "bun": ">=1.4.4",
+        "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+    },
+    "scripts": {
+        "dev": "wrangler dev --local --ip 127.0.0.1 --port 8787",
+        "dev:cms": "bun run build && bun run build:cms && bun build scripts/cms-dev.ts --target=node --packages=external --outdir=.local/tools && node .local/tools/cms-dev.js",
+        "types": "wrangler types",
+        "typecheck": "bun run types && bun --bun tsc --noEmit && bun --bun tsc -p tsconfig.tools.json --noEmit",
+        "typecheck:cms": "tsc -p tsconfig.cms.json --noEmit",
+        "build": "wrangler deploy --dry-run --outdir dist",
+        "build:cms": "vite build && wrangler deploy --dry-run --config cms/wrangler.jsonc --outdir ../dist-bridge",
+        "check": "bun run typecheck && bun run typecheck:cms && bun run build && bun run build:cms",
+        "db:init": "wrangler d1 execute DB --local --file schema.sql",
+        "db:execute": "wrangler d1 execute DB",
+        "provision": "bun scripts/provision.ts",
+        "deploy:staging": "wrangler deploy --config wrangler.staging.jsonc",
+        "deploy:cms:staging": "bun run build:cms && wrangler deploy --config cms/wrangler.staging.jsonc"
+    },
+    "dependencies": {
+        "@hono/zod-openapi": "^1.6.3",
+        "@hookform/resolvers": "^7.0.2",
+        "@tanstack/react-query": "^5.105.3",
+        "class-variance-authority": "^0.7.1",
+        "clsx": "^2.1.1",
+        "fflate": "^0.8.3",
+        "hono": "4.13.16",
+        "lucide-react": "^1.68.0",
+        "radix-ui": "^1.8.1",
+        "react": "^19.3.1",
+        "react-dom": "^19.3.1",
+        "react-hook-form": "^7.91.0",
+        "react-router": "^8.5.1",
+        "semver": "^7.8.6",
+        "tailwind-merge": "^3.7.0",
+        "zod": "^4.6.7"
+    },
+    "devDependencies": {
+        "@tailwindcss/vite": "^4.3.4",
+        "@types/bun": "^1.4.4",
+        "@types/node": "26.6.6",
+        "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
+        "@types/semver": "^7.8.0",
+        "@vitejs/plugin-react": "^6.2.1",
+        "miniflare": "5.20261103.0-beta",
+        "postcss-prefix-selector": "^2.2.1",
+        "tailwindcss": "^4.3.4",
+        "typescript": "7.0.2",
+        "vite": "^8.3.5",
+        "wrangler": "4.157.0"
+    }
+}

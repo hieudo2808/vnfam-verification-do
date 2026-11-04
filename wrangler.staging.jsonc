@@ -1,0 +1,31 @@
+{
+    "$schema": "./node_modules/wrangler/config-schema.json",
+    "name": "vnfam-device-api-staging",
+    "main": "src/index.ts",
+    "account_id": "e3751cca6cbf061906dbf691456c8dd8",
+    "compatibility_date": "2026-11-04",
+    "compatibility_flags": ["nodejs_compat"],
+    "vars": {
+        "REGISTRATION_SITE_ID": "staging_site",
+        "REGISTRATION_SCOPE_ID": "staging_scope",
+        "REGISTRATION_SCOPE_NAME": "Bảo tàng thử nghiệm",
+    },
+    "workers_dev": false,
+    "preview_urls": false,
+    "routes": [{ "pattern": "devices-staging.castorice.tech", "custom_domain": true }],
+    "d1_databases": [
+        {
+            "binding": "DB",
+            "database_name": "vnfam-staging",
+            "database_id": "0093d347-23e7-4e84-83e4-5d9a6b57f0b6",
+        },
+    ],
+    "r2_buckets": [{ "binding": "FIRMWARE", "bucket_name": "vnfam-firmware-staging" }],
+    "durable_objects": { "bindings": [{ "name": "DEVICES", "class_name": "DeviceDO" }] },
+    "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceDO"] }],
+    "observability": {
+        "enabled": true,
+        "redact_query_string": true,
+        "traces": { "enabled": true },
+    },
+}
