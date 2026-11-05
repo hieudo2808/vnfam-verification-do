@@ -37,6 +37,36 @@ export async function verify(
         return false;
     }
 }
+export async function verifyP256(
+    publicKey: string,
+    signature: string,
+    message: string
+): Promise<boolean> {
+    try {
+        const raw = unb64(publicKey),
+            sig = unb64(signature);
+        if (raw.length !== 65 || raw[0] !== 4 || sig.length !== 64) return false;
+        const key = await crypto.subtle.importKey(
+            "raw",
+            raw,
+            { name: "ECDSA", namedCurve: "P-256" },
+            false,
+            ["verify"]
+        );
+        return await crypto.subtle.verify(
+            { name: "ECDSA", hash: "SHA-256" },
+            key,
+            sig,
+            bytes(message)
+        );
+    } catch {
+        return false;
+    }
+}
+export const verifyDeviceSignature = (publicKey: string, signature: string, message: string) =>
+    publicKey.length === 87
+        ? verifyP256(publicKey, signature, message)
+        : verify(publicKey, signature, message);
 export const qrBytes = (q: {
     deviceId: string;
     scopeId: string;

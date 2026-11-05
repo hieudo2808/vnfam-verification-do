@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { ApiError, type AppEnv } from "./platform";
 import { registryRoutes } from "./routes/registry";
 import { checkInRoutes } from "./routes/checkins";
+import { checkinVerificationRoutes } from "./routes/checkin-verification";
 import { deviceRoutes } from "./routes/devices";
 import { firmwareRoutes } from "./routes/firmware";
 import { cmsRoutes } from "./routes/cms";
@@ -41,6 +42,7 @@ app.openAPIRegistry.registerComponent("securitySchemes", "DeviceBearer", {
 registryRoutes(app);
 cmsRoutes(app);
 checkInRoutes(app);
+checkinVerificationRoutes(app);
 deviceRoutes(app);
 firmwareRoutes(app);
 runtimeSettingsRoutes(app);

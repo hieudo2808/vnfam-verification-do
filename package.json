@@ -9,10 +9,11 @@
         "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
     },
     "scripts": {
+        "postinstall": "bun run types",
         "dev": "wrangler dev --local --ip 127.0.0.1 --port 8787",
         "dev:cms": "bun run build && bun run build:cms && bun build scripts/cms-dev.ts --target=node --packages=external --outdir=.local/tools && node .local/tools/cms-dev.js",
         "types": "wrangler types",
-        "typecheck": "bun run types && bun --bun tsc --noEmit && bun --bun tsc -p tsconfig.tools.json --noEmit",
+        "typecheck": "bun run types && bun --bun tsc --noEmit && bun --bun tsc -p scripts/tsconfig.json --noEmit",
         "typecheck:cms": "tsc -p tsconfig.cms.json --noEmit",
         "build": "wrangler deploy --dry-run --outdir dist",
         "build:cms": "vite build && wrangler deploy --dry-run --config cms/wrangler.jsonc --outdir ../dist-bridge",

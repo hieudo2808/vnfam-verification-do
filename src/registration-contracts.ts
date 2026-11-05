@@ -1,5 +1,5 @@
 import { z } from "@hono/zod-openapi";
-import { Id, PublicKey, Signature, Time } from "./contracts";
+import { Id, PublicKey, DevicePublicKey, Signature, Time } from "./contracts";
 
 export const RegistrationState = z.enum([
     "CHALLENGE",
@@ -11,7 +11,7 @@ export const RegistrationState = z.enum([
     "EXPIRED",
 ]);
 export const RegistrationInput = z.strictObject({
-    publicKey: PublicKey,
+    publicKey: DevicePublicKey,
     hardwareTarget: Id,
     serial: z.string().min(1).max(100).optional(),
 });
@@ -30,7 +30,7 @@ export const RegistrationMeta = z.strictObject({
     deviceId: Id.nullable(),
     hardwareTarget: Id,
     serial: z.string().nullable(),
-    publicKey: PublicKey,
+    publicKey: DevicePublicKey,
     keyId: PublicKey,
     state: RegistrationState,
     createdAt: Time,

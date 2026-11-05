@@ -32,7 +32,7 @@ export const PairingMeta = z.strictObject({
 });
 export const KeyMeta = z.strictObject({
     keyId: S.PublicKey,
-    publicKey: S.PublicKey,
+    publicKey: S.DevicePublicKey,
     generation: z.number().int(),
     state: z.enum(["ACTIVE", "PENDING", "REVOKED"]),
     createdAt: S.Time,

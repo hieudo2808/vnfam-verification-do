@@ -40,7 +40,7 @@ export async function cmsRuntime(port = 8788) {
                     scriptPath: "dist/index.js",
                     compatibilityDate: "2026-11-04",
                     compatibilityFlags: ["nodejs_compat"],
-                    routes: ["*/api/*", "*/health", "*/openapi.json"],
+                    routes: ["*/api/*", "*/checkin*", "*/health", "*/openapi.json"],
                     durableObjects: { DEVICES: { className: "DeviceDO", useSQLite: true } },
                     d1Databases: ["DB"],
                     r2Buckets: ["FIRMWARE"],

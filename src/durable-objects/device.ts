@@ -15,7 +15,7 @@ import {
     type OperationRow,
     type Principal,
 } from "../platform";
-import { hash, canonical, randomToken, unb64, verify, rotationBytes } from "../crypto";
+import { hash, canonical, randomToken, unb64, verifyDeviceSignature, rotationBytes } from "../crypto";
 import { changed, claim, replay, type Intent } from "../http";
 import { advance, resultState } from "../operations";
 
@@ -642,7 +642,7 @@ export class DeviceDO extends DurableObject<Env> {
                         newKeyId = await hash(unb64(m.payload.publicKey));
                     if (
                         p.nonce !== m.payload.nonce ||
-                        !(await verify(
+                        !(await verifyDeviceSignature(
                             m.payload.publicKey,
                             m.payload.proof,
                             rotationBytes(

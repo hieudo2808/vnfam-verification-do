@@ -3,7 +3,7 @@ import * as R from "../registration-contracts";
 import * as S from "../contracts";
 import { type App, endpoint, commit, changed, intent, replay, replayResponse } from "../http";
 import { ApiError, audit, db, device, grants, parse, rateLimit, type Ctx } from "../platform";
-import { hash, randomToken, unb64, verify } from "../crypto";
+import { hash, randomToken, unb64, verifyDeviceSignature } from "../crypto";
 
 type RegistrationRow = {
     registrationId: string;
@@ -54,7 +54,7 @@ async function access(c: Ctx, claimSecret: string) {
 async function proof(c: Ctx, row: RegistrationRow, signature: string, phase: "SUBMIT" | "CLAIM") {
     if (row.expiresAt < Date.now()) throw new ApiError(410, "REGISTRATION_EXPIRED");
     if (row.state === "LOCKED") throw new ApiError(409, "REGISTRATION_LOCKED");
-    if (!(await verify(row.publicKey, signature, R.registrationBytes(phase, row)))) {
+    if (!(await verifyDeviceSignature(row.publicKey, signature, R.registrationBytes(phase, row)))) {
         await db(c.env)
             .prepare(
                 "UPDATE device_registrations SET attempts=attempts+1,state=CASE WHEN attempts+1>=5 THEN 'LOCKED' ELSE state END WHERE registrationId=? AND state IN('CHALLENGE','PENDING','APPROVED')"
@@ -250,7 +250,7 @@ export function registrationRoutes(app: App) {
             if (old) return replayResponse(old);
             if (row.expiresAt < Date.now()) throw new ApiError(410, "REGISTRATION_EXPIRED");
             if (row.state !== "PENDING") throw new ApiError(409, "REGISTRATION_STATE_CONFLICT");
-            const deviceId = crypto.randomUUID(),
+            const deviceId = crypto.randomUUID().replaceAll("-", ""),
                 response = meta({ ...row, state: "APPROVED", deviceId });
             return commit(c, action, input, response, [
                 alive(c, row),

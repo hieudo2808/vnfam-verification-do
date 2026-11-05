@@ -17,6 +17,8 @@ Bun quản lý dependency và chạy lệnh; Node chạy bên trong Wrangler và
 
 Cần Bun từ 1.4.4 và Node 24 LTS.
 
+`bun install` tự sinh `worker-configuration.d.ts` qua Wrangler. Đây là types cần cho TypeScript/editor, không dọn cùng bundle build; khi sửa bindings hoặc bỏ qua lifecycle scripts, chạy `bun run types`. Worker dùng `tsconfig.json`, công cụ dùng `scripts/tsconfig.json`, CMS và bridge dùng `tsconfig.cms.json`.
+
 ```sh
 bun install --frozen-lockfile
 bun run dev:cms
@@ -32,6 +34,14 @@ bun run dev
 ```
 
 API ở `http://127.0.0.1:8787`; `/health` kiểm tra dịch vụ và `/openapi.json` cung cấp OpenAPI hiện hành. `db:init` chỉ chạy một lần trên database trắng. `schema.sql` chứa các bảng/index/cấu hình mặc định trực tiếp, không chứa credential hoặc thiết bị mẫu. Không import lại vào database đã có dữ liệu.
+
+`schema.sql` là file SQL khởi tạo duy nhất, gồm hạn chấp nhận QR 60 giây và lệch tương lai tối đa 5 giây. Với database **dev đã có**, chỉ cập nhật policy chung (ảnh hưởng cả GET mới và POST cũ):
+
+```sh
+bun run db:execute --local --command "UPDATE qr_policy SET maxAgeMs=60000,futureSkewMs=5000 WHERE id=1"
+```
+
+Lệnh chỉ cập nhật policy, không đổi ID/credential/lịch sử. Không tự áp dụng lên staging hoặc production.
 
 ```sh
 bun run typecheck
@@ -133,7 +143,9 @@ Wi-Fi ban đầu, TLS, SNTP, sinh/giữ khóa và lưu NVS do firmware triển k
 
 ### 1. Đăng ký và chờ CMS duyệt
 
-ESP32 tự sinh cặp **Pure Ed25519**, giữ private key trên máy. Public key raw 32 byte và signature raw 64 byte dùng Base64URL không padding. `keyId = Base64URL(SHA-256(rawPublicKey))`.
+ESP32 tự sinh cặp **ECDSA P-256**, giữ private key trên máy. Public key là điểm uncompressed `04 || X[32] || Y[32]`, tổng 65 byte; mã hóa Base64URL canonical không padding thành 87 ký tự. Proof dùng ECDSA/SHA-256, chữ ký raw IEEE P1363 `r[32] || s[32]` big-endian, tổng 64 byte, Base64URL không padding thành 86 ký tự. Backend vẫn nhận khóa/proof Pure Ed25519 hiện có để giữ tương thích.
+
+`keyId = Base64URL(SHA-256(rawPublicKey))`, luôn 43 ký tự. Đây là ID khóa của backend này; không dùng `kid` hex SHA-256 của SPKI DER trong heartbeat ở repo firmware thay thế. Firmware phải chuyển chữ ký DER nội bộ sang raw cho cả proof đăng ký, khôi phục ghép nối và rotation. Private key không gửi lên server.
 
 | Bước                   | Request                                                                                              | Kết quả                                                                    |
 | ---------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
@@ -151,7 +163,7 @@ REGISTER_CLAIM_V1|<registrationId>|<nonce>|<keyId>
 
 Admin mở **Thiết bị → Thiết bị chờ duyệt**, đối chiếu máy và nhập tên/vị trí để duyệt. Secret/token không hiện trong CMS. Phiên hết hạn sau 10 phút; state có `CHALLENGE`, `PENDING`, `APPROVED`, `CLAIMED`, `REJECTED`, `LOCKED`, `EXPIRED`. Sai proof đủ 5 lần bị khóa.
 
-Lưu bền token/deviceId/generation trước khi kết nối. Mất response sau claim không được tự xin token khác; admin dùng **Khôi phục ghép nối** trên hồ sơ hiện có. Mất mạng đơn thuần dùng lại identity, không đăng ký máy mới. Schema đầy đủ: `src/registration-contracts.ts`; pairing phục hồi: `/api/device-pairings/complete` trong OpenAPI.
+Lưu bền token/deviceId/generation trước khi kết nối. Mất response sau claim không được tự xin token khác; admin dùng **Khôi phục ghép nối** trên hồ sơ hiện có. Thiết bị có thể giữ nguyên khóa QR và ký proof cho phiên pairing mới; recovery tăng generation, cấp token mới và vô hiệu token cũ. Khóa đã thuộc máy khác không được chuyển sang máy này. Mất mạng đơn thuần dùng lại identity, không đăng ký máy mới. Schema đầy đủ: `src/registration-contracts.ts`; pairing phục hồi: `/api/device-pairings/complete` trong OpenAPI.
 
 ### 2. WebSocket và BOOT
 
@@ -191,6 +203,48 @@ Nguồn schema WS: `DeviceMessage`, `ServerMessage`, `Boot`, `Result` trong `src
 
 Trước TLS lần đầu có thể cần bootstrap SNTP bằng `vn.pool.ntp.org`. Sau khi có credential, đọc `GET /api/devices/:deviceId/time-settings` trước mỗi lần tự đồng bộ: `{protocol:"SNTP",server,revision,timezone}`. Mặc định múi giờ `Asia/Ho_Chi_Minh` (UTC+7). SNTP đồng bộ UTC; múi giờ chỉ đổi hiển thị, **không cộng 7 giờ vào epoch ký QR**.
 
+#### QR theo contract: GET chỉ xác minh
+
+Firmware ký **ECDSA P-256 với SHA-256** trên đúng ASCII sau, không BOM/khoảng trắng/newline:
+
+```text
+t = floor(unixSeconds / 30) * 30
+v1.<did>.<t>
+```
+
+`did` là deviceId `[a-z0-9-]{1,32}`. Public key uncompressed 65 byte, bắt đầu bằng `04`; chữ ký raw `r || s` 64 byte, mã hóa Base64URL canonical không padding. QR dùng chữ ký raw, không nhận ASN.1 DER. QR chứa URL:
+
+```text
+https://<api-host>/checkin?v=1&did=<deviceId>&t=<unixSeconds>&sig=<base64url>
+```
+
+WebCrypto import public key với `format: "raw"`, `{name: "ECDSA", namedCurve: "P-256"}` rồi verify bằng `{name: "ECDSA", hash: "SHA-256"}` trên message gốc. WebCrypto tự hash một lần; không SHA-256 message trước khi gọi verify. Endpoint chỉ nhận đúng bốn tham số trên, mỗi tham số một giá trị.
+
+Firmware dùng deviceId đã nhận khi ghép nối. Máy đăng ký mới được cấp ID hex thường 32 ký tự; máy dev cũ dùng UUID 36 ký tự cần đăng ký mới để thử giao thức này. ID/credential/lịch sử cũ không bị tự sửa hoặc xóa. Khi mất mạng hoặc reboot, dùng lại identity đã lưu, không tự đăng ký lại.
+
+Đặt `qrBaseUrl` thành `https://<api-host>/checkin` qua API cấu hình hiện có, rồi gửi `APPLY_CONFIG`; firmware cần hỗ trợ đọc/áp dụng cấu hình này và triển khai format trên. Không tự thay cấu hình máy hay đoán format từ URL. Khi thử `dev:cms`, `/checkin` cũng được chuyển tới backend trên cùng host cổng 8788; HTTP local dùng để dev, cấu hình URL thiết bị vẫn yêu cầu HTTPS. Dùng host HTTPS trỏ tới môi trường dev hoặc gọi URL local trực tiếp từ công cụ kiểm thử.
+
+Repo [firmware tại commit bf8039b](https://github.com/dongduy1412/vnfarm_qrcode/tree/bf8039bd8272f88105f2277176073557f4af9bbc) đã ký đúng định dạng QR này nhưng đang lấy `did` từ MAC, cố định URL theo build và gửi HTTP heartbeat `/api/devices/:did/ping`. Chưa có client đăng ký/claim và WebSocket của backend này. Đội firmware cần nối các bước ở mục 1–2, lưu và dùng deviceId server cấp, áp dụng đúng URL môi trường và giữ chu kỳ 30 giây. Backend không tự tin khóa từ MAC, không có endpoint nhập public key thủ công.
+
+`GET /checkin` không cần Bearer token, không lưu người chơi/check-in và không redirect. Hợp lệ trả `200`:
+
+```json
+{
+    "valid": true,
+    "deviceId": "door-1",
+    "issuedAtMs": 1800000000000,
+    "verifiedAtMs": 1800000005000
+}
+```
+
+`t` trên URL dùng **giây**; hai field có hậu tố `Ms` trong kết quả dùng **milliseconds**. Thiếu/trùng/dư/sai tham số hoặc tương lai quá xa trả `400 {"error":"bad_request"}`; máy không tồn tại trả `404 unknown_device`; chữ ký sai hoặc máy/khóa không đủ điều kiện trả `401 invalid_signature`; quá hạn trả `410 expired`; giới hạn tần suất trả `429 rate_limited`; storage/policy không khả dụng trả `503 unavailable`. Tất cả lỗi có shape `{"error":"<code>"}`. Các phản hồi đều `Cache-Control: no-store`, kể cả khi browser không gửi `Accept: application/json`. Không hiển thị trang lỗi HTML ở module dev này.
+
+GET mới và POST cũ dùng chung policy quản trị: mặc định TTL 60 giây, future skew 5 giây; khoảng cấu hình vẫn là TTL 30–60 giây và skew 0–5 giây. Đổi QR mỗi 30 giây không phải thời hạn phiên người chơi. Giới hạn dev là 120 request/phút/IP (`CF-Connecting-IP`); khi chạy local thiếu header dùng một bucket chung.
+
+Module `src/checkin-verification.ts` export `ContractQrQuery`, `contractQrBytes` và `verifyCheckinQr(qr, publicKey, policy, nowMs)`. Backend tổng có thể tái sử dụng bằng cách validate đầu vào, cung cấp khóa tin cậy/policy/giờ server rồi nhận kết quả hoặc mã lỗi; phần crypto không phụ thuộc Hono/D1/DO. Phiên đăng nhập, ghi nhận người chơi, hiệu lực check-in, chống ghi trùng theo user, status và redirect/tem do backend tổng nối sau. JSON xác minh không phải credential hoặc bằng chứng cấp thưởng dùng lại được.
+
+#### QR/API hiện có: giữ tương thích
+
 Đọc `GET /api/devices/:deviceId/desired-state` để lấy `config:{revision,scopeId,qrBaseUrl,appliedRevision}`, firmware target và operation đang đối chiếu. Đổi QR mỗi 30 giây:
 
 ```text
@@ -198,7 +252,7 @@ issuedAtMs = floor(nowMs / 30000) * 30000
 CHECKIN_V1|<deviceId>|<scopeId>|<keyId>|<issuedAtMs>
 ```
 
-Ký dòng trên bằng Ed25519. QR chứa `{version:1,deviceId,scopeId,keyId,issuedAtMs,signature}`. `qrBaseUrl` hiện rỗng: phát JSON đã ký, chưa redirect. Khi tích hợp có URL HTTPS, dùng URL đó với các trường QR làm query parameters. Backend nhận các trường đã tách, không fetch URL.
+Ký dòng trên bằng loại khóa thiết bị đã đăng ký: Ed25519 hoặc ECDSA P-256/SHA-256 với chữ ký raw P1363. POST cũ tiếp tục tạo receipt sau khi thiết bị đổi sang khóa P-256; message vẫn là `CHECKIN_V1|...`, không dùng chữ ký `v1.<did>.<t>` của GET thay thế. QR chứa `{version:1,deviceId,scopeId,keyId,issuedAtMs,signature}`. `qrBaseUrl` hiện rỗng: phát JSON đã ký, chưa redirect. Khi tích hợp có URL HTTPS, dùng URL đó với các trường QR làm query parameters. Backend nhận các trường đã tách, không fetch URL.
 
 Backend minigame gọi `POST /api/check-ins` bằng credential của mình:
 
@@ -218,7 +272,7 @@ Backend minigame gọi `POST /api/check-ins` bằng credential của mình:
 }
 ```
 
-Thay timestamp/chữ ký bằng dữ liệu hiện tại. Cửa sổ mặc định: QR không cũ quá 35 giây, không vượt tương lai quá 5 giây. Nhiều subject dùng chung QR được. Kết quả trả bản xác nhận với `checkInId` và thời điểm, không trả quyền chơi/nhận thưởng. `subjectName` là tên CMS hiển thị trong **Subject / Scope**; thiếu tên thì hiện chưa có tên. Scope có tên từ cấu hình server.
+Thay timestamp/chữ ký bằng dữ liệu hiện tại. Cửa sổ mặc định trên database mới hoặc đã áp dụng SQL policy: QR không cũ quá 60 giây, không vượt tương lai quá 5 giây. Nhiều subject dùng chung QR được. Kết quả trả bản xác nhận với `checkInId` và thời điểm, không trả quyền chơi/nhận thưởng. `subjectName` là tên CMS hiển thị trong **Subject / Scope**; thiếu tên thì hiện chưa có tên. Scope có tên từ cấu hình server.
 
 ### 4. Cấu hình, lệnh và OTA
 
@@ -253,7 +307,7 @@ Manifest gồm `releaseId`, `buildId`, `hardwareTarget`, `version` SemVer, `size
 FIRMWARE_V1|<releaseId>|<buildId>|<hardwareTarget>|<version>|<size>|<sha256>|<publisherKeyId>
 ```
 
-Image tối đa 8 MiB và không vượt slot OTA khai báo. CMS nhận một ZIP; backend xác minh/chờ duyệt/gán rồi mới gửi upgrade. ESP32 tải manifest và binary bằng token máy tại `/api/devices/:deviceId/firmware/:releaseId/manifest` và `/binary`. Binary hỗ trợ single Range, ETag và resume; vẫn phải kiểm tra hash toàn image. Public key nhà phát hành được cấp tin cậy riêng cho backend **và firmware**, không tin khóa tự khai trong manifest.
+Manifest vẫn dùng Pure Ed25519 với public key raw 32 byte và chữ ký raw 64 byte; thay đổi P-256 cho khóa thiết bị không đổi thuật toán ký manifest. Image tối đa 8 MiB và không vượt slot OTA khai báo. CMS nhận một ZIP; backend xác minh/chờ duyệt/gán rồi mới gửi upgrade. ESP32 tải manifest và binary bằng token máy tại `/api/devices/:deviceId/firmware/:releaseId/manifest` và `/binary`. Binary hỗ trợ single Range, ETag và resume; vẫn phải kiểm tra hash toàn image. Public key nhà phát hành được cấp tin cậy riêng cho backend **và firmware**, không tin khóa tự khai trong manifest.
 
 Chỉ OTA application, giữ identity/NVS; không thay bootloader/partition table. Sau self-test gửi BOOT/result đúng build. Rollback gửi `success:false,reason:"ROLLED_BACK"` cùng build thực tế. Reconnect/tải xong không được báo thành công.
 
@@ -263,6 +317,6 @@ Chỉ OTA application, giữ identity/NVS; không thay bootloader/partition tabl
 
 Repo gồm backend/CMS, cấu hình build/deploy, `bun.lock`, `schema.sql`, script vận hành và README. AGENTS.md, `.agents`, node_modules, file secret và dữ liệu local được Git bỏ qua. Khi deploy Cloudflare, Wrangler chỉ upload Worker bundle và assets CMS đã build.
 
-Mã/schema hiện hành để đội tích hợp đối chiếu: `src/contracts.ts`, `src/registration-contracts.ts`, `src/runtime-contracts.ts`, `src/routes/*` và endpoint `/openapi.json`. Các mốc thời gian dùng UTC epoch milliseconds; ID là ASCII `[A-Za-z0-9_-]{1,128}`; lỗi HTTP theo `{error:{code,message,requestId}}`.
+Mã/schema hiện hành để đội tích hợp đối chiếu: `src/contracts.ts`, `src/registration-contracts.ts`, `src/runtime-contracts.ts`, `src/routes/*` và endpoint `/openapi.json`. API hiện có dùng UTC epoch milliseconds, ID ASCII `[A-Za-z0-9_-]{1,128}` và lỗi `{error:{code,message,requestId}}`; `GET /checkin` có query timestamp giây, ID và lỗi riêng theo contract ở trên.
 
-ESP32 thực vẫn cần đội firmware xác nhận TLS/SNTP, Ed25519/QR màn hình, NVS/journal, quét/đổi Wi-Fi, partition, mất điện và rollback. QR ngắn hạn giảm khả năng relay nhưng không chứng minh tuyệt đối người quét đang ở bảo tàng.
+ESP32 thực vẫn cần đội firmware xác nhận TLS/SNTP, P-256/QR màn hình, ghép nối tự động, NVS/journal, quét/đổi Wi-Fi, partition, mất điện và rollback. Kiểm thử workerd/vector không thay cho xác nhận bằng QR từ board thật. QR ngắn hạn giảm khả năng relay nhưng không chứng minh tuyệt đối người quét đang ở bảo tàng.

@@ -3,9 +3,6 @@
 /dist/
 /coverage/
 /.local/
-/AGENTS.md
-/.agents/
-/docs/
 /test/
 /tests/
 /cms/test/
@@ -24,4 +21,8 @@
 .dev.vars.*
 /*.m4a
 .vscode/
-bun.lock
+
+docs/
+.agents/
+AGENTS.md
+images/

@@ -2,7 +2,7 @@ import { z } from "@hono/zod-openapi";
 import * as S from "../contracts";
 import { type App, endpoint, commit, intent, replay, replayResponse, changed } from "../http";
 import { ApiError, audit, db, device, grants, parse } from "../platform";
-import { qrBytes, verify } from "../crypto";
+import { qrBytes, verifyDeviceSignature } from "../crypto";
 import { HistoryQuery, CheckInSummary } from "../cms-contracts";
 
 export function checkInRoutes(app: App) {
@@ -56,7 +56,7 @@ export function checkInRoutes(app: App) {
                 d.scopeId !== input.scopeId ||
                 age > policy.maxAgeMs ||
                 age < -policy.futureSkewMs ||
-                !(await verify(key.publicKey, q.signature, qrBytes(q)))
+                !(await verifyDeviceSignature(key.publicKey, q.signature, qrBytes(q)))
             )
                 throw new ApiError(422, "QR_INVALID");
             const response = {

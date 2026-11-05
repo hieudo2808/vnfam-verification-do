@@ -13,6 +13,17 @@ const canonicalB64 = (value: string) => {
     }
 };
 export const PublicKey = B64.length(43).refine(canonicalB64);
+export const DevicePublicKey = z.union([
+    PublicKey,
+    B64.length(87).refine((value) => {
+        try {
+            const raw = unb64(value);
+            return raw.length === 65 && raw[0] === 4;
+        } catch {
+            return false;
+        }
+    }),
+]);
 export const Signature = B64.length(86).refine(canonicalB64);
 export const HttpsUrl = z.url().refine((v) => {
     const u = new URL(v);
@@ -91,7 +102,7 @@ export const PairingInput = z.strictObject({
 export const PairingComplete = z.strictObject({
     pairingId: Id,
     code: B64.length(43),
-    publicKey: PublicKey,
+    publicKey: DevicePublicKey,
     proof: Signature,
 });
 export const Pairing = z.strictObject({
@@ -238,7 +249,7 @@ export const Boot = z.strictObject({
     wifiSsid: z.string().max(32).optional(),
     time: TimeReport.optional(),
 });
-export const RotationProof = z.strictObject({ publicKey: PublicKey, nonce: B64, proof: Signature });
+export const RotationProof = z.strictObject({ publicKey: DevicePublicKey, nonce: B64, proof: Signature });
 const base = { version: z.literal(1), eventId: Id };
 const op = { ...base, operationId: Id };
 export const DeviceMessage = z.discriminatedUnion("type", [

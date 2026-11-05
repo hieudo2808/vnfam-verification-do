@@ -1,7 +1,7 @@
 import * as S from "../contracts";
 import { type App, endpoint, commit, changed, intent, replay, replayResponse } from "../http";
 import { ApiError, audit, db, device, grants, publicDevice, parse, rateLimit } from "../platform";
-import { hash, randomToken, unb64, verify, pairingBytes } from "../crypto";
+import { hash, randomToken, unb64, verifyDeviceSignature, pairingBytes } from "../crypto";
 
 export function registryRoutes(app: App) {
     endpoint(
@@ -375,7 +375,7 @@ export function registryRoutes(app: App) {
             const keyId = await hash(unb64(input.publicKey));
             if (
                 p.codeHash !== (await hash(input.code)) ||
-                !(await verify(input.publicKey, input.proof, pairingBytes(p, keyId)))
+                !(await verifyDeviceSignature(input.publicKey, input.proof, pairingBytes(p, keyId)))
             ) {
                 await db(c.env)
                     .prepare(
@@ -405,13 +405,18 @@ export function registryRoutes(app: App) {
                         "UPDATE devices SET generation=?,credentialHash=?,pairedAt=?,confirmedAt=NULL,appliedRevision=0 WHERE deviceId=? AND generation=? AND deletedAt IS NULL"
                     ).bind(p.generation, await hash(token), now, p.deviceId, p.generation - 1),
                     changed(c.env),
-                    c.env.DB.prepare("INSERT INTO qr_keys VALUES(?,?,?,?,'ACTIVE',NULL,?)").bind(
+                    c.env.DB.prepare(
+                        `INSERT INTO qr_keys VALUES(?,?,?,?,'ACTIVE',NULL,?)
+                         ON CONFLICT(keyId) DO UPDATE SET generation=excluded.generation,state='ACTIVE',operationId=NULL
+                         WHERE qr_keys.deviceId=excluded.deviceId AND qr_keys.publicKey=excluded.publicKey`
+                    ).bind(
                         keyId,
                         p.deviceId,
                         p.generation,
                         input.publicKey,
                         now
                     ),
+                    changed(c.env),
                     audit(
                         c.env,
                         { clientId: "device" },
