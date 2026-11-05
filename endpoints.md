@@ -73,8 +73,6 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
 | | `GET` | `/api/admin/check-in-summaries` | `audit:read` | Xem lịch sử check-in có kèm tên hiển thị |
 | **Đăng ký ESP32** | `POST` | `/api/device-registrations` | Không | ESP32 xin challenge đăng ký |
 | | `POST` | `/api/device-registrations/{id}/complete` | Không (Nonce + Proof) | ESP32 hoàn tất đăng ký; backend tự lưu máy, khóa và cấp credential |
-| | `GET` | `/api/admin/device-registrations` | `devices:read` | CMS theo dõi đăng ký theo trạng thái |
-| | `GET` | `/api/admin/devices/{deviceId}/registration` | `devices:read` | CMS xem tiến trình đăng ký của máy |
 | **Khôi phục Pairing** | `POST` | `/api/admin/device-pairings` | `pairings:write` | CMS tạo mã phiên ghép nối khôi phục |
 | | `DELETE` | `/api/admin/device-pairings/{pairingId}` | `pairings:write` | CMS hủy phiên ghép nối |
 | | `POST` | `/api/device-pairings/complete` | Không (Proof + Code) | ESP32 nộp proof để lấy token mới |
@@ -292,16 +290,8 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
     "token": "device_token_43_chars_base64url..."
   }
   ```
-  *(ESP32 lưu `token`, `deviceId`, `generation` vào NVS bền vững trước khi kết nối. Token này dùng làm `DeviceBearer`; `confirmedAt` vẫn chờ `BOOT_REPORT` hợp lệ. Challenge chỉ hoàn tất một lần: gọi lại không tạo thêm máy hoặc trả lại token. Mất response cần recovery có xác thực trên hồ sơ đã tạo, tra cứu qua CMS)*.
+  *(ESP32 lưu `token`, `deviceId`, `generation` vào NVS bền vững trước khi kết nối. Token này dùng làm `DeviceBearer`; `confirmedAt` vẫn chờ `BOOT_REPORT` hợp lệ. Challenge chỉ hoàn tất một lần: gọi lại không tạo thêm máy hoặc trả lại token. Mất response cần recovery có xác thực trên hồ sơ thiết bị đã tạo)*.
 - **Kiểm tra:** nonce sai không tăng số lần sai proof; nonce đúng nhưng proof sai đủ 5 lần khóa challenge. Hết hạn trả `410 REGISTRATION_EXPIRED`; challenge đã hoàn tất hoặc bị khóa trả lỗi `409`. Public key đã đăng ký không được gán sang máy mới.
-
----
-
-#### `GET /api/admin/device-registrations`
-- **Mục đích:** CMS theo dõi đăng ký trong site/scope được cấp, không trả nonce hoặc token.
-- **Quyền:** `devices:read`.
-- **Query Parameters:** `state` là `ALL`, `CHALLENGE`, `COMPLETED`, `LOCKED` hoặc `EXPIRED`; mặc định `ALL`. `cursor` và `limit` (1–100, mặc định 25) phân trang.
-- **Output:** `200 OK` `{ "items": [RegistrationMeta], "nextCursor": null }`.
 
 ---
 

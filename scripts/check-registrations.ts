@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { cmsRuntime } from "./cms-runtime";
 import { b64, bytes, hash, randomToken } from "../src/crypto";
 import * as R from "../src/registration-contracts";
-import { PairingResult, pageOf } from "../src/contracts";
+import { PairingResult } from "../src/contracts";
 
 const { mf, base } = await cmsRuntime(8791);
 try {
@@ -123,30 +123,8 @@ try {
     assert.equal((await stored(locked.registrationId))!.state, "LOCKED");
     assert.equal(await countDevices(), 3);
 
-    const listResponse = await fetch(base + "/cms-api/device-registrations?state=ALL");
-    assert.equal(listResponse.status, 200);
-    const list = pageOf(R.RegistrationMeta).parse(await listResponse.json());
-    assert.ok(list.items.some((r) => r.registrationId === challenge.registrationId && r.state === "COMPLETED"));
-    const defaultList = pageOf(R.RegistrationMeta).parse(await (await fetch(base + "/cms-api/device-registrations")).json());
-    assert.deepEqual(defaultList, list);
-    for (const state of ["COMPLETED", "EXPIRED", "LOCKED", "CHALLENGE"]) {
-        const filtered = pageOf(R.RegistrationMeta).parse(await (await fetch(
-            base + "/cms-api/device-registrations?state=" + state
-        )).json());
-        assert.ok(filtered.items.length > 0);
-        assert.ok(filtered.items.every((r) => r.state === state));
-    }
-    const publicText = JSON.stringify(list);
-    for (const secret of [challenge.nonce, completed.token, device!.credentialHash])
-        assert.equal(publicText.includes(secret), false);
-    await db.prepare("UPDATE device_registrations SET siteId='other_site' WHERE registrationId=?")
-        .bind(locked.registrationId).run();
-    await db.prepare("UPDATE device_registrations SET scopeId='other_scope' WHERE registrationId=?")
-        .bind(expired.registrationId).run();
-    const scoped = pageOf(R.RegistrationMeta).parse(await (await fetch(
-        base + "/cms-api/device-registrations?state=ALL"
-    )).json());
-    assert.equal(scoped.items.some((r) => [locked.registrationId, expired.registrationId].includes(r.registrationId)), false);
+    assert.equal((await fetch(base + "/cms-api/device-registrations")).status, 404);
+    assert.equal((await fetch(base + "/cms-api/devices/" + completed.deviceId + "/registration")).status, 404);
 
     for (const suffix of ["submit", "status", "claim"]) assert.equal((await post(
         "device-registrations/" + challenge.registrationId + "/" + suffix, {}

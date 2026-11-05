@@ -2,7 +2,7 @@ import { z } from "@hono/zod-openapi";
 import * as R from "../registration-contracts";
 import * as S from "../contracts";
 import { type App, endpoint, changed } from "../http";
-import { ApiError, audit, db, device, grants, parse, rateLimit, type Ctx } from "../platform";
+import { ApiError, audit, db, rateLimit, type Ctx } from "../platform";
 import { hash, randomToken, unb64, verifyDeviceSignature } from "../crypto";
 
 type RegistrationRow = {
@@ -26,17 +26,6 @@ function sameBytes(a: Uint8Array, b: Uint8Array) {
     let different = 0;
     for (let i = 0; i < a.length; i++) different |= a[i]! ^ b[i]!;
     return different === 0;
-}
-function meta(row: RegistrationRow) {
-    return R.RegistrationMeta.parse({
-        ...Object.fromEntries(
-            Object.keys(R.RegistrationMeta.shape).map((key) => [
-                key,
-                row[key as keyof RegistrationRow],
-            ])
-        ),
-        state: row.state === "CHALLENGE" && row.expiresAt < Date.now() ? "EXPIRED" : row.state,
-    });
 }
 async function registration(c: Ctx) {
     const row = await db(c.env)
@@ -169,64 +158,6 @@ export function registrationRoutes(app: App) {
                 throw e;
             }
             return c.json({ deviceId, generation: 1, keyId: row.keyId, token }, 201);
-        }
-    );
-    endpoint(
-        app,
-        {
-            method: "get",
-            path: "/api/admin/device-registrations",
-            permission: "devices:read",
-            query: R.RegistrationQuery,
-            output: S.pageOf(R.RegistrationMeta),
-            summary: "Monitor device registrations restricted by configured site and scope",
-        },
-        async (c) => {
-            const p = c.get("principal"),
-                q = parse(R.RegistrationQuery, c.req.query());
-            const state = "CASE WHEN state='CHALLENGE' AND expiresAt<? THEN 'EXPIRED' ELSE state END";
-            const rows = await db(c.env)
-                .prepare(
-                    `SELECT * FROM device_registrations WHERE siteId IN(SELECT value FROM json_each(?)) AND scopeId IN(SELECT value FROM json_each(?)) AND registrationId>? AND (?='ALL' OR ${state}=?) ORDER BY registrationId LIMIT ?`
-                )
-                .bind(
-                    JSON.stringify(p.sites),
-                    JSON.stringify(p.scopes),
-                    q.cursor ?? "",
-                    q.state,
-                    Date.now(),
-                    q.state,
-                    q.limit + 1
-                )
-                .all<RegistrationRow>();
-            return c.json({
-                items: rows.results.slice(0, q.limit).map(meta),
-                nextCursor:
-                    rows.results.length > q.limit
-                        ? rows.results[q.limit - 1]!.registrationId
-                        : null,
-            });
-        }
-    );
-    endpoint(
-        app,
-        {
-            method: "get",
-            path: "/api/admin/devices/{deviceId}/registration",
-            permission: "devices:read",
-            output: R.RegistrationMeta.nullable(),
-            summary: "Read registration details for one authorized device",
-        },
-        async (c) => {
-            const d = await device(c.env, c.req.param("deviceId")!);
-            grants(c.get("principal"), d.siteId, d.scopeId);
-            const row = await db(c.env)
-                .prepare(
-                    "SELECT * FROM device_registrations WHERE deviceId=? ORDER BY createdAt DESC,registrationId DESC LIMIT 1"
-                )
-                .bind(d.deviceId)
-                .first<RegistrationRow>();
-            return c.json(row ? meta(row) : null);
         }
     );
 }

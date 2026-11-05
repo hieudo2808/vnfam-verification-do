@@ -4,7 +4,7 @@ Hệ thống quản lý các máy phát QR tại đầu vào bảo tàng. ESP32 
 
 ## Hệ thống có gì
 
-- **Thiết bị:** ESP32 gửi public key và chứng minh sở hữu private key; backend lưu D1 và tự duyệt đăng ký. CMS theo dõi tiến trình, xem kết nối, bật/tắt tiếp nhận check-in, cấu hình và lịch sử. Xóa máy sẽ thu hồi quyền kết nối/khóa QR, ẩn khỏi danh sách đang dùng; lịch sử được giữ lại.
+- **Thiết bị:** ESP32 gửi public key và chứng minh sở hữu private key; backend lưu D1, tự tạo thiết bị và thiết bị xuất hiện thẳng trong danh sách **Thiết bị**. CMS chỉ xem kết nối, bật/tắt tiếp nhận check-in, cấu hình và lịch sử; không có màn hình đăng ký riêng. Xóa máy sẽ thu hồi quyền kết nối/khóa QR, ẩn khỏi danh sách đang dùng; lịch sử được giữ lại.
 - **Bảo trì:** quét/chọn Wi-Fi nếu firmware hỗ trợ, lưu/áp dụng cấu hình, lấy trạng thái, khởi động lại, xóa Wi-Fi, đổi khóa QR và flash firmware cho một máy.
 - **Cài đặt chung:** SNTP/múi giờ, chính sách xác minh QR và tải firmware để cập nhật các máy được chọn.
 - **Check-in và Nhật ký:** xem lượt đã xác nhận, tên tương ứng với Subject / Scope, tên máy và hành động quản trị. ID phục vụ tra cứu nằm trong phần thu gọn.
@@ -161,11 +161,11 @@ REGISTER_V1|<registrationId>|<nonce>|<keyId>
 
 Theo quyết định ngày 05/11/2026, public key được lưu ngay khi tạo challenge trong `device_registrations`. Sau proof hợp lệ tại `complete`, một transaction D1 tự tạo máy, cấp credential, lưu khóa `ACTIVE` vào `qr_keys` và chuyển đăng ký sang `COMPLETED`. Tên ban đầu là serial đã bỏ khoảng trắng đầu/cuối, hoặc `hardwareTarget` nếu serial trống. Nonce là bí mật của challenge, phải gửi lại tại `complete`; backend không cho người chỉ biết registrationId làm tăng số lần sai proof. `confirmedAt` và trạng thái kết nối vẫn chờ `BOOT_REPORT` hợp lệ.
 
-Admin mở **Thiết bị** để theo dõi cả danh sách máy và đăng ký thiết bị trên cùng màn hình; không có bước duyệt/từ chối trên CMS. Nonce/token không hiện trong CMS. Phiên hết hạn sau 10 phút; state chỉ có `CHALLENGE`, `COMPLETED`, `LOCKED`, `EXPIRED`. Gửi đúng nonce nhưng sai proof đủ 5 lần bị khóa. Challenge chỉ hoàn tất một lần; gọi lại không tạo thêm máy hoặc trả lại token.
+CMS không có màn hình đăng ký riêng. Khi proof hợp lệ, backend tự tạo thiết bị và thiết bị xuất hiện trong danh sách **Thiết bị**; CMS chỉ hiển thị trạng thái vận hành và công cụ khôi phục ghép nối. Nonce/token không hiện trong CMS. Phiên hết hạn sau 10 phút; state chỉ có `CHALLENGE`, `COMPLETED`, `LOCKED`, `EXPIRED`. Gửi đúng nonce nhưng sai proof đủ 5 lần bị khóa. Challenge chỉ hoàn tất một lần; gọi lại không tạo thêm máy hoặc trả lại token.
 
 Đăng ký mới là luồng công khai: proof chỉ chứng minh bên gọi sở hữu private key, không chứng minh thiết bị thuộc tổ chức. Thiết bị gọi được endpoint và vượt qua kiểm tra hiện có sẽ được tự đăng ký vào site/scope do backend cấu hình. Luồng này không cho phép lấy khóa mới tự khai để thay identity của máy đã có; recovery và rotation vẫn phải xác thực.
 
-Lưu bền token/deviceId/generation trước khi kết nối. Mất response sau `complete` không được tự xin token khác; admin dùng **Khôi phục ghép nối** trên hồ sơ đã tạo, tra cứu bằng đăng ký trên CMS. Thiết bị có thể giữ nguyên khóa QR và ký proof cho phiên pairing mới; recovery tăng generation, cấp token mới và vô hiệu token cũ. Khóa đã thuộc máy khác không được chuyển sang máy này. Mất mạng đơn thuần dùng lại identity, không đăng ký máy mới. Schema đầy đủ: `src/registration-contracts.ts`; pairing phục hồi: `/api/device-pairings/complete` trong OpenAPI.
+Lưu bền token/deviceId/generation trước khi kết nối. Mất response sau `complete` không được tự xin token khác; admin dùng **Khôi phục ghép nối** trên hồ sơ thiết bị đã tạo. Thiết bị có thể giữ nguyên khóa QR và ký proof cho phiên pairing mới; recovery tăng generation, cấp token mới và vô hiệu token cũ. Khóa đã thuộc máy khác không được chuyển sang máy này. Mất mạng đơn thuần dùng lại identity, không đăng ký máy mới. Schema đầy đủ: `src/registration-contracts.ts`; pairing phục hồi: `/api/device-pairings/complete` trong OpenAPI.
 
 ### 2. WebSocket và BOOT
 

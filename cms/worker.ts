@@ -17,12 +17,12 @@ export interface BridgeEnv {
 const routes: [string, RegExp][] = [
     [
         "GET",
-        /^\/(context|device-summaries|device-registrations|audit-events|audit-summaries|check-ins|check-in-summaries|check-in-policy|time-settings|devices|firmware-releases)$/,
+        /^\/(context|device-summaries|audit-events|audit-summaries|check-ins|check-in-summaries|check-in-policy|time-settings|devices|firmware-releases)$/,
     ],
     ["POST", /^\/(devices|device-pairings|firmware-releases)$/],
     [
         "GET",
-        /^\/devices\/[A-Za-z0-9_-]+(\/(overview|config|runtime-settings|registration|operations|events))?$/,
+        /^\/devices\/[A-Za-z0-9_-]+(\/(overview|config|runtime-settings|operations|events))?$/,
     ],
     ["GET", /^\/devices\/[A-Za-z0-9_-]+\/operations\/[A-Za-z0-9_-]+$/],
     ["PATCH", /^\/devices\/[A-Za-z0-9_-]+(\/(config|network-config))?$/],
