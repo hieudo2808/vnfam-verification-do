@@ -22,15 +22,25 @@ import { connectionLabel, operationLabel } from "./client";
 import { Maintenance, OperationTable } from "./maintenance";
 import { HistoryTable } from "./history";
 import { useIntent } from "./intent";
-import { RegistrationMeta } from "../../src/registration-contracts";
+import * as R from "../../src/registration-contracts";
 import { useQueryClient } from "@tanstack/react-query";
 export function Devices() {
     const [params, setParams] = useSearchParams(),
         [pages, setPages] = useState<string[]>([]),
-        cursor = pages.at(-1);
+        cursor = pages.at(-1),
+        [registrationState, setRegistrationState] = useState("ALL"),
+        [registrationPages, setRegistrationPages] = useState<string[]>([]),
+        registrationCursor = registrationPages.at(-1);
     const q = new URLSearchParams(params);
     if (cursor) q.set("cursor", cursor);
     const list = useRead("/device-summaries?" + q, S.pageOf(C.Summary));
+    const registrations = useRead(
+        "/device-registrations?state=" +
+            registrationState +
+            (registrationCursor ? "&cursor=" + registrationCursor : ""),
+        S.pageOf(R.RegistrationMeta),
+        2000
+    );
     const filter = (key: string, value: string) => {
         setPages([]);
         setParams((p) => {
@@ -44,9 +54,6 @@ export function Devices() {
                 <div>
                     <h1>Thiết bị</h1>
                 </div>
-                <Button asChild>
-                    <Link to="registrations">Đăng ký thiết bị</Link>
-                </Button>
             </div>
             <div className="filters">
                 <Field label="Tìm theo tên hoặc mã">
@@ -146,6 +153,78 @@ export function Devices() {
                     </>
                 )}
             </ReadState>
+            <section>
+                <h2>Đăng ký thiết bị</h2>
+                <p>Public key được lưu và thiết bị tự nhận quyền sau khi chứng minh sở hữu khóa.</p>
+                <Field label="Trạng thái đăng ký">
+                    <select
+                        value={registrationState}
+                        onChange={(e) => {
+                            setRegistrationState(e.target.value);
+                            setRegistrationPages([]);
+                        }}
+                    >
+                        <option value="ALL">Tất cả</option>
+                        {R.RegistrationState.options.map((state) => (
+                            <option key={state} value={state}>
+                                {operationLabel(state)}
+                            </option>
+                        ))}
+                    </select>
+                </Field>
+                <ReadState query={registrations}>
+                    {registrations.data && !registrations.data.items.length && (
+                        <p>Chưa có đăng ký phù hợp.</p>
+                    )}
+                    <div className="table-wrap">
+                        <table>
+                            <caption className="sr-only">Đăng ký thiết bị</caption>
+                            <thead>
+                                <tr>
+                                    <th>Thiết bị</th>
+                                    <th>Mã đăng ký / khóa</th>
+                                    <th>Nhận lúc</th>
+                                    <th>Trạng thái</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {registrations.data?.items.map((registration) => (
+                                    <tr key={registration.registrationId}>
+                                        <td>
+                                            {registration.deviceId ? (
+                                                <Link to={registration.deviceId}>
+                                                    {registration.serial?.trim() || registration.hardwareTarget}
+                                                </Link>
+                                            ) : (
+                                                registration.serial?.trim() || registration.hardwareTarget
+                                            )}
+                                            <small>{registration.hardwareTarget}</small>
+                                        </td>
+                                        <td>
+                                            <code>{registration.registrationId}</code>
+                                            <small>
+                                                <code>{registration.keyId}</code>
+                                            </small>
+                                        </td>
+                                        <td>
+                                            <Stamp value={registration.createdAt} />
+                                        </td>
+                                        <td>{operationLabel(registration.state)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <PageButtons
+                        next={registrations.data?.nextCursor ?? null}
+                        previous={registrationPages.length > 0}
+                        onNext={() =>
+                            setRegistrationPages([...registrationPages, registrations.data!.nextCursor!])
+                        }
+                        onPrevious={() => setRegistrationPages((p) => p.slice(0, -1))}
+                    />
+                </ReadState>
+            </section>
         </>
     );
 }
@@ -388,7 +467,7 @@ function EnrollmentPanel({
             data.pairing?.state === "PENDING" || !!pairingSecrets?.[data.device.deviceId];
     const query = useRead(
         "/devices/" + data.device.deviceId + "/registration",
-        RegistrationMeta.nullable(),
+        R.RegistrationMeta.nullable(),
         data.identity === "CONFIRMED" ? 15000 : 2000
     );
     if (query.isPending) return <p role="status">Đang tải đăng ký…</p>;

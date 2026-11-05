@@ -161,7 +161,7 @@ REGISTER_V1|<registrationId>|<nonce>|<keyId>
 
 Theo quyết định ngày 05/11/2026, public key được lưu ngay khi tạo challenge trong `device_registrations`. Sau proof hợp lệ tại `complete`, một transaction D1 tự tạo máy, cấp credential, lưu khóa `ACTIVE` vào `qr_keys` và chuyển đăng ký sang `COMPLETED`. Tên ban đầu là serial đã bỏ khoảng trắng đầu/cuối, hoặc `hardwareTarget` nếu serial trống. Nonce là bí mật của challenge, phải gửi lại tại `complete`; backend không cho người chỉ biết registrationId làm tăng số lần sai proof. `confirmedAt` và trạng thái kết nối vẫn chờ `BOOT_REPORT` hợp lệ.
 
-Admin mở **Thiết bị → Đăng ký thiết bị** (`devices/registrations`) để theo dõi, không có bước duyệt/từ chối trên CMS. Nonce/token không hiện trong CMS. Phiên hết hạn sau 10 phút; state chỉ có `CHALLENGE`, `COMPLETED`, `LOCKED`, `EXPIRED`. Gửi đúng nonce nhưng sai proof đủ 5 lần bị khóa. Challenge chỉ hoàn tất một lần; gọi lại không tạo thêm máy hoặc trả lại token.
+Admin mở **Thiết bị** để theo dõi cả danh sách máy và đăng ký thiết bị trên cùng màn hình; không có bước duyệt/từ chối trên CMS. Nonce/token không hiện trong CMS. Phiên hết hạn sau 10 phút; state chỉ có `CHALLENGE`, `COMPLETED`, `LOCKED`, `EXPIRED`. Gửi đúng nonce nhưng sai proof đủ 5 lần bị khóa. Challenge chỉ hoàn tất một lần; gọi lại không tạo thêm máy hoặc trả lại token.
 
 Đăng ký mới là luồng công khai: proof chỉ chứng minh bên gọi sở hữu private key, không chứng minh thiết bị thuộc tổ chức. Thiết bị gọi được endpoint và vượt qua kiểm tra hiện có sẽ được tự đăng ký vào site/scope do backend cấu hình. Luồng này không cho phép lấy khóa mới tự khai để thay identity của máy đã có; recovery và rotation vẫn phải xác thực.
 

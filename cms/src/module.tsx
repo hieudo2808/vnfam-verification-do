@@ -8,7 +8,6 @@ import { Devices, NewDevice, DeviceDetail } from "./devices";
 import { Firmware, FirmwareDetail } from "./firmware";
 import { HistoryTable, Policy } from "./history";
 import { TimeSettingsPage } from "./runtime-settings";
-import { DeviceRegistrations } from "./registrations";
 import "./styles.css";
 export interface DeviceAdminConfig {
     basePath?: string;
@@ -85,10 +84,6 @@ export function DeviceAdminModule({
                             <Routes>
                                 <Route path="devices" element={<Devices />} />
                                 <Route path="devices/new" element={<NewDevice />} />
-                                <Route
-                                    path="devices/registrations"
-                                    element={<DeviceRegistrations />}
-                                />
                                 <Route path="devices/:deviceId" element={<DeviceDetail />} />
                                 <Route path="settings" element={<SettingsLayout />}>
                                     <Route index element={<Navigate to="firmware" replace />} />
