@@ -142,9 +142,6 @@ export function registryRoutes(app: App) {
                 c.env.DB.prepare(
                     "UPDATE pairings SET state='CANCELLED' WHERE deviceId=? AND state='PENDING'"
                 ).bind(d.deviceId),
-                c.env.DB.prepare(
-                    "UPDATE device_registrations SET state='REJECTED' WHERE deviceId=? AND state='APPROVED'"
-                ).bind(d.deviceId),
                 c.env.DB.prepare("DELETE FROM device_network_config WHERE deviceId=?").bind(
                     d.deviceId
                 ),

@@ -1,7 +1,7 @@
 import { z } from "@hono/zod-openapi";
 import * as R from "../registration-contracts";
 import * as S from "../contracts";
-import { type App, endpoint, commit, changed, intent, replay, replayResponse } from "../http";
+import { type App, endpoint, changed } from "../http";
 import { ApiError, audit, db, device, grants, parse, rateLimit, type Ctx } from "../platform";
 import { hash, randomToken, unb64, verifyDeviceSignature } from "../crypto";
 
@@ -14,7 +14,6 @@ type RegistrationRow = {
     hardwareTarget: string;
     serial: string | null;
     nonce: string;
-    secretHash: string;
     state: z.infer<typeof R.RegistrationState>;
     attempts: number;
     deviceId: string | null;
@@ -22,6 +21,12 @@ type RegistrationRow = {
     expiresAt: number;
 };
 type RegistrationEnv = Env & { REGISTRATION_SITE_ID?: string; REGISTRATION_SCOPE_ID?: string };
+function sameBytes(a: Uint8Array, b: Uint8Array) {
+    if (a.length !== b.length) return false;
+    let different = 0;
+    for (let i = 0; i < a.length; i++) different |= a[i]! ^ b[i]!;
+    return different === 0;
+}
 function meta(row: RegistrationRow) {
     return R.RegistrationMeta.parse({
         ...Object.fromEntries(
@@ -30,10 +35,7 @@ function meta(row: RegistrationRow) {
                 row[key as keyof RegistrationRow],
             ])
         ),
-        state:
-            ["CHALLENGE", "PENDING", "APPROVED"].includes(row.state) && row.expiresAt < Date.now()
-                ? "EXPIRED"
-                : row.state,
+        state: row.state === "CHALLENGE" && row.expiresAt < Date.now() ? "EXPIRED" : row.state,
     });
 }
 async function registration(c: Ctx) {
@@ -44,30 +46,6 @@ async function registration(c: Ctx) {
     if (!row) throw new ApiError(404, "REGISTRATION_NOT_FOUND");
     return row;
 }
-async function access(c: Ctx, claimSecret: string) {
-    await rateLimit(c.env, "registration:poll:global", 1200);
-    const row = await registration(c);
-    if ((await hash(claimSecret)) !== row.secretHash) throw new ApiError(401, "UNAUTHORIZED");
-    await rateLimit(c.env, "registration:" + row.registrationId, 30);
-    return row;
-}
-async function proof(c: Ctx, row: RegistrationRow, signature: string, phase: "SUBMIT" | "CLAIM") {
-    if (row.expiresAt < Date.now()) throw new ApiError(410, "REGISTRATION_EXPIRED");
-    if (row.state === "LOCKED") throw new ApiError(409, "REGISTRATION_LOCKED");
-    if (!(await verifyDeviceSignature(row.publicKey, signature, R.registrationBytes(phase, row)))) {
-        await db(c.env)
-            .prepare(
-                "UPDATE device_registrations SET attempts=attempts+1,state=CASE WHEN attempts+1>=5 THEN 'LOCKED' ELSE state END WHERE registrationId=? AND state IN('CHALLENGE','PENDING','APPROVED')"
-            )
-            .bind(row.registrationId)
-            .run();
-        throw new ApiError(422, "PROOF_INVALID");
-    }
-}
-const alive = (c: Ctx, row: RegistrationRow) =>
-    c.env.DB.prepare(
-        "INSERT INTO transaction_guard SELECT count(*) FROM device_registrations WHERE registrationId=? AND expiresAt>=unixepoch('subsec')*1000 AND attempts<5"
-    ).bind(row.registrationId);
 export function registrationRoutes(app: App) {
     endpoint(
         app,
@@ -77,7 +55,7 @@ export function registrationRoutes(app: App) {
             input: R.RegistrationInput,
             output: R.RegistrationChallenge,
             status: 201,
-            summary: "ESP32 requests an enrollment challenge; no identity trust yet",
+            summary: "Store the public key and issue a private enrollment challenge",
         },
         async (c, input) => {
             await rateLimit(c.env, "registration:create:global", 120);
@@ -87,8 +65,8 @@ export function registrationRoutes(app: App) {
             if (!site.success || !scope.success)
                 throw new ApiError(503, "REGISTRATION_NOT_CONFIGURED");
             const siteId = site.data,
-                scopeId = scope.data;
-            const keyId = await hash(unb64(input.publicKey));
+                scopeId = scope.data,
+                keyId = await hash(unb64(input.publicKey));
             if (
                 await db(c.env)
                     .prepare("SELECT keyId FROM qr_keys WHERE keyId=?")
@@ -98,12 +76,11 @@ export function registrationRoutes(app: App) {
                 throw new ApiError(409, "KEY_ALREADY_REGISTERED");
             const registrationId = crypto.randomUUID(),
                 nonce = randomToken(),
-                claimSecret = randomToken(),
                 createdAt = Date.now(),
                 expiresAt = createdAt + 600000;
             await db(c.env)
                 .prepare(
-                    "INSERT INTO device_registrations VALUES(?,?,?,?,?,?,?,?,?,'CHALLENGE',0,NULL,?,?)"
+                    "INSERT INTO device_registrations VALUES(?,?,?,?,?,?,?,?,'CHALLENGE',0,NULL,?,?)"
                 )
                 .bind(
                     registrationId,
@@ -114,61 +91,85 @@ export function registrationRoutes(app: App) {
                     input.hardwareTarget,
                     input.serial ?? null,
                     nonce,
-                    await hash(claimSecret),
                     createdAt,
                     expiresAt
                 )
                 .run();
-            return c.json({ registrationId, nonce, claimSecret, expiresAt }, 201);
+            return c.json({ registrationId, nonce, expiresAt }, 201);
         }
     );
     endpoint(
         app,
         {
             method: "post",
-            path: "/api/device-registrations/{registrationId}/submit",
+            path: "/api/device-registrations/{registrationId}/complete",
             input: R.RegistrationProof,
-            output: R.RegistrationMeta,
-            summary: "Proof of possession makes an ESP32 request visible for CMS approval",
+            output: S.PairingResult,
+            status: 201,
+            summary: "Verify key possession, register the device and issue its credential once",
         },
         async (c, input) => {
-            const row = await access(c, input.claimSecret);
-            await proof(c, row, input.proof, "SUBMIT");
-            if (row.state === "PENDING") return c.json(meta(row));
+            await rateLimit(c.env, "registration:complete:global", 1200);
+            const row = await registration(c);
+            if (!sameBytes(unb64(input.nonce), unb64(row.nonce)))
+                throw new ApiError(401, "UNAUTHORIZED");
+            await rateLimit(c.env, "registration:" + row.registrationId, 30);
+            if (row.expiresAt < Date.now()) throw new ApiError(410, "REGISTRATION_EXPIRED");
+            if (row.state === "LOCKED") throw new ApiError(409, "REGISTRATION_LOCKED");
             if (row.state !== "CHALLENGE") throw new ApiError(409, "REGISTRATION_STATE_CONFLICT");
+            if (!(await verifyDeviceSignature(row.publicKey, input.proof, R.registrationBytes(row)))) {
+                await db(c.env)
+                    .prepare(
+                        "UPDATE device_registrations SET attempts=attempts+1,state=CASE WHEN attempts+1>=5 THEN 'LOCKED' ELSE state END WHERE registrationId=? AND state='CHALLENGE'"
+                    )
+                    .bind(row.registrationId)
+                    .run();
+                throw new ApiError(422, "PROOF_INVALID");
+            }
+            const deviceId = crypto.randomUUID().replaceAll("-", ""),
+                token = randomToken(),
+                now = Date.now();
             try {
                 await db(c.env).batch([
-                    alive(c, row),
                     c.env.DB.prepare(
-                        "UPDATE device_registrations SET state='EXPIRED' WHERE keyId=? AND state='PENDING' AND expiresAt<?"
-                    ).bind(row.keyId, Date.now()),
-                    c.env.DB.prepare(
-                        "INSERT INTO transaction_guard SELECT NOT EXISTS(SELECT 1 FROM qr_keys WHERE keyId=?)"
-                    ).bind(row.keyId),
-                    c.env.DB.prepare(
-                        "UPDATE device_registrations SET state='PENDING' WHERE registrationId=? AND state='CHALLENGE'"
+                        "INSERT INTO transaction_guard SELECT count(*) FROM device_registrations WHERE registrationId=? AND state='CHALLENGE' AND expiresAt>=unixepoch('subsec')*1000 AND attempts<5"
                     ).bind(row.registrationId),
+                    c.env.DB.prepare(
+                        "INSERT INTO devices(deviceId,name,siteId,doorId,scopeId,qrBaseUrl,generation,credentialHash,pairedAt,createdAt) VALUES(?,?,?,?,?,'',1,?,?,?)"
+                    ).bind(
+                        deviceId,
+                        row.serial?.trim() || row.hardwareTarget,
+                        row.siteId,
+                        deviceId,
+                        row.scopeId,
+                        await hash(token),
+                        now,
+                        now
+                    ),
+                    c.env.DB.prepare("INSERT INTO qr_keys VALUES(?,?,1,?,'ACTIVE',NULL,?)").bind(
+                        row.keyId,
+                        deviceId,
+                        row.publicKey,
+                        now
+                    ),
+                    c.env.DB.prepare(
+                        "UPDATE device_registrations SET state='COMPLETED',deviceId=? WHERE registrationId=? AND state='CHALLENGE'"
+                    ).bind(deviceId, row.registrationId),
                     changed(c.env),
+                    audit(c.env, { clientId: "device" }, deviceId, "DEVICE_REGISTRATION_COMPLETED", {
+                        deviceId,
+                        siteId: row.siteId,
+                        scopeId: row.scopeId,
+                    }),
                     c.env.DB.prepare("DELETE FROM transaction_guard"),
                 ]);
             } catch (e) {
                 if (/constraint|CONSTRAINT/.test(String(e)))
-                    throw new ApiError(409, "REGISTRATION_CONFLICT");
+                    throw new ApiError(409, "REGISTRATION_STATE_CONFLICT");
                 throw e;
             }
-            return c.json(meta({ ...row, state: "PENDING" }));
+            return c.json({ deviceId, generation: 1, keyId: row.keyId, token }, 201);
         }
-    );
-    endpoint(
-        app,
-        {
-            method: "post",
-            path: "/api/device-registrations/{registrationId}/status",
-            input: R.RegistrationAccess,
-            output: R.RegistrationMeta,
-            summary: "ESP32 privately polls approval state without receiving a credential",
-        },
-        async (c, input) => c.json(meta(await access(c, input.claimSecret)))
     );
     endpoint(
         app,
@@ -178,21 +179,21 @@ export function registrationRoutes(app: App) {
             permission: "devices:read",
             query: R.RegistrationQuery,
             output: S.pageOf(R.RegistrationMeta),
-            summary: "Pending device requests restricted by configured site and scope",
+            summary: "Monitor device registrations restricted by configured site and scope",
         },
         async (c) => {
             const p = c.get("principal"),
                 q = parse(R.RegistrationQuery, c.req.query());
-            const state =
-                "CASE WHEN state IN('CHALLENGE','PENDING','APPROVED') AND expiresAt<? THEN 'EXPIRED' ELSE state END";
+            const state = "CASE WHEN state='CHALLENGE' AND expiresAt<? THEN 'EXPIRED' ELSE state END";
             const rows = await db(c.env)
                 .prepare(
-                    `SELECT * FROM device_registrations WHERE siteId IN(SELECT value FROM json_each(?)) AND scopeId IN(SELECT value FROM json_each(?)) AND registrationId>? AND ${state}=? ORDER BY registrationId LIMIT ?`
+                    `SELECT * FROM device_registrations WHERE siteId IN(SELECT value FROM json_each(?)) AND scopeId IN(SELECT value FROM json_each(?)) AND registrationId>? AND (?='ALL' OR ${state}=?) ORDER BY registrationId LIMIT ?`
                 )
                 .bind(
                     JSON.stringify(p.sites),
                     JSON.stringify(p.scopes),
                     q.cursor ?? "",
+                    q.state,
                     Date.now(),
                     q.state,
                     q.limit + 1
@@ -214,8 +215,7 @@ export function registrationRoutes(app: App) {
             path: "/api/admin/devices/{deviceId}/registration",
             permission: "devices:read",
             output: R.RegistrationMeta.nullable(),
-            summary:
-                "Read enrollment progress for one authorized device without changing legacy overview",
+            summary: "Read registration details for one authorized device",
         },
         async (c) => {
             const d = await device(c.env, c.req.param("deviceId")!);
@@ -227,138 +227,6 @@ export function registrationRoutes(app: App) {
                 .bind(d.deviceId)
                 .first<RegistrationRow>();
             return c.json(row ? meta(row) : null);
-        }
-    );
-    endpoint(
-        app,
-        {
-            method: "post",
-            path: "/api/admin/device-registrations/{registrationId}/approve",
-            permission: "pairings:write",
-            input: R.RegistrationApproval,
-            output: R.RegistrationMeta,
-            summary:
-                "CMS approves a proven request and creates the device without exposing its token",
-        },
-        async (c, input) => {
-            const row = await registration(c),
-                p = c.get("principal");
-            grants(p, row.siteId, row.scopeId);
-            if (!p.permissions.includes("devices:write")) throw new ApiError(403, "FORBIDDEN");
-            const action = "registration:approve:" + row.registrationId,
-                old = await replay(c.env, await intent(c, action, input));
-            if (old) return replayResponse(old);
-            if (row.expiresAt < Date.now()) throw new ApiError(410, "REGISTRATION_EXPIRED");
-            if (row.state !== "PENDING") throw new ApiError(409, "REGISTRATION_STATE_CONFLICT");
-            const deviceId = crypto.randomUUID().replaceAll("-", ""),
-                response = meta({ ...row, state: "APPROVED", deviceId });
-            return commit(c, action, input, response, [
-                alive(c, row),
-                c.env.DB.prepare(
-                    "INSERT INTO transaction_guard SELECT count(*) FROM service_credentials WHERE credentialId=? AND revokedAt IS NULL AND 'pairings:write' IN(SELECT value FROM json_each(permissions)) AND 'devices:write' IN(SELECT value FROM json_each(permissions)) AND ? IN(SELECT value FROM json_each(sites)) AND ? IN(SELECT value FROM json_each(scopes))"
-                ).bind(p.credentialId, row.siteId, row.scopeId),
-                c.env.DB.prepare(
-                    "INSERT INTO transaction_guard SELECT NOT EXISTS(SELECT 1 FROM qr_keys WHERE keyId=?)"
-                ).bind(row.keyId),
-                c.env.DB.prepare(
-                    "INSERT INTO devices(deviceId,name,siteId,doorId,scopeId,qrBaseUrl,createdAt) VALUES(?,?,?,?,?,?,?)"
-                ).bind(deviceId, input.name, row.siteId, deviceId, row.scopeId, "", Date.now()),
-                c.env.DB.prepare(
-                    "UPDATE device_registrations SET state='APPROVED',deviceId=? WHERE registrationId=? AND state='PENDING'"
-                ).bind(deviceId, row.registrationId),
-                changed(c.env),
-                audit(c.env, p, c.get("actorId"), "DEVICE_REGISTRATION_APPROVED", {
-                    deviceId,
-                    siteId: row.siteId,
-                    scopeId: row.scopeId,
-                }),
-            ]);
-        }
-    );
-    endpoint(
-        app,
-        {
-            method: "delete",
-            path: "/api/admin/device-registrations/{registrationId}",
-            permission: "pairings:write",
-            output: S.Ok,
-            summary: "CMS rejects a pending device request",
-        },
-        async (c) => {
-            const row = await registration(c),
-                p = c.get("principal");
-            grants(p, row.siteId, row.scopeId);
-            return commit(c, "registration:reject:" + row.registrationId, {}, { ok: true }, [
-                c.env.DB.prepare(
-                    "INSERT INTO transaction_guard SELECT count(*) FROM service_credentials WHERE credentialId=? AND revokedAt IS NULL AND 'pairings:write' IN(SELECT value FROM json_each(permissions)) AND ? IN(SELECT value FROM json_each(sites)) AND ? IN(SELECT value FROM json_each(scopes))"
-                ).bind(p.credentialId, row.siteId, row.scopeId),
-                c.env.DB.prepare(
-                    "UPDATE device_registrations SET state='REJECTED' WHERE registrationId=? AND state='PENDING'"
-                ).bind(row.registrationId),
-                changed(c.env),
-                audit(
-                    c.env,
-                    p,
-                    c.get("actorId"),
-                    "DEVICE_REGISTRATION_REJECTED",
-                    undefined,
-                    JSON.stringify({ registrationId: row.registrationId })
-                ),
-            ]);
-        }
-    );
-    endpoint(
-        app,
-        {
-            method: "post",
-            path: "/api/device-registrations/{registrationId}/claim",
-            input: R.RegistrationProof,
-            output: S.PairingResult,
-            status: 201,
-            summary: "Approved ESP32 claims its credential once with its original key proof",
-        },
-        async (c, input) => {
-            const row = await access(c, input.claimSecret);
-            await proof(c, row, input.proof, "CLAIM");
-            if (row.state !== "APPROVED" || !row.deviceId)
-                throw new ApiError(409, "REGISTRATION_STATE_CONFLICT");
-            const token = randomToken(),
-                now = Date.now();
-            try {
-                await db(c.env).batch([
-                    alive(c, row),
-                    c.env.DB.prepare(
-                        "INSERT INTO transaction_guard SELECT NOT EXISTS(SELECT 1 FROM audit WHERE deviceId=? AND action='CREDENTIAL_REVOKED')"
-                    ).bind(row.deviceId),
-                    c.env.DB.prepare(
-                        "UPDATE device_registrations SET state='CLAIMED' WHERE registrationId=? AND state='APPROVED'"
-                    ).bind(row.registrationId),
-                    changed(c.env),
-                    c.env.DB.prepare(
-                        "UPDATE devices SET generation=1,credentialHash=?,pairedAt=? WHERE deviceId=? AND generation=0 AND credentialHash IS NULL AND deletedAt IS NULL"
-                    ).bind(await hash(token), now, row.deviceId),
-                    changed(c.env),
-                    c.env.DB.prepare("INSERT INTO qr_keys VALUES(?,?,1,?,'ACTIVE',NULL,?)").bind(
-                        row.keyId,
-                        row.deviceId,
-                        row.publicKey,
-                        now
-                    ),
-                    audit(
-                        c.env,
-                        { clientId: "device" },
-                        row.deviceId,
-                        "DEVICE_REGISTRATION_CLAIMED",
-                        { deviceId: row.deviceId, siteId: row.siteId, scopeId: row.scopeId }
-                    ),
-                    c.env.DB.prepare("DELETE FROM transaction_guard"),
-                ]);
-            } catch (e) {
-                if (/constraint|CONSTRAINT/.test(String(e)))
-                    throw new ApiError(409, "REGISTRATION_STATE_CONFLICT");
-                throw e;
-            }
-            return c.json({ deviceId: row.deviceId, generation: 1, keyId: row.keyId, token }, 201);
         }
     );
 }

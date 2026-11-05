@@ -19,7 +19,7 @@ Backend sử dụng 3 mức xác thực độc lập:
    - Không yêu cầu token. Dành cho probe hệ thống (`/health`, `/openapi.json`) và quét QR tại cửa (`/checkin`).
 2. **Thiết bị ESP32 (`DeviceBearer`):**
    - Header: `Authorization: Bearer <device-token>`
-   - Token nhận được sau khi thiết bị claim đăng ký hoặc khôi phục ghép nối (pairing).
+   - Token nhận được sau khi thiết bị hoàn tất đăng ký hoặc khôi phục ghép nối (pairing).
 3. **Dịch vụ nội bộ CMS / Minigame / Operator (`ServiceBearer`):**
    - Header: `Authorization: Bearer <service-token>`
    - Bắt buộc đi kèm:
@@ -72,12 +72,8 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
 | | `GET` | `/api/admin/check-ins` | `audit:read` | Xem lịch sử check-in dạng biên lai |
 | | `GET` | `/api/admin/check-in-summaries` | `audit:read` | Xem lịch sử check-in có kèm tên hiển thị |
 | **Đăng ký ESP32** | `POST` | `/api/device-registrations` | Không | ESP32 xin challenge đăng ký |
-| | `POST` | `/api/device-registrations/{id}/submit` | Không (Proof) | ESP32 nộp proof sở hữu khóa để chờ duyệt |
-| | `POST` | `/api/device-registrations/{id}/status` | Không (Secret) | ESP32 thăm dò trạng thái duyệt |
-| | `POST` | `/api/device-registrations/{id}/claim` | Không (Proof) | ESP32 nhận credential sau khi được duyệt |
-| | `GET` | `/api/admin/device-registrations` | `devices:read` | CMS xem danh sách máy chờ duyệt |
-| | `POST` | `/api/admin/device-registrations/{id}/approve` | `pairings:write` & `devices:write` | CMS phê duyệt máy và đặt tên |
-| | `DELETE` | `/api/admin/device-registrations/{id}` | `pairings:write` | CMS từ chối yêu cầu đăng ký |
+| | `POST` | `/api/device-registrations/{id}/complete` | Không (Nonce + Proof) | ESP32 hoàn tất đăng ký; backend tự lưu máy, khóa và cấp credential |
+| | `GET` | `/api/admin/device-registrations` | `devices:read` | CMS theo dõi đăng ký theo trạng thái |
 | | `GET` | `/api/admin/devices/{deviceId}/registration` | `devices:read` | CMS xem tiến trình đăng ký của máy |
 | **Khôi phục Pairing** | `POST` | `/api/admin/device-pairings` | `pairings:write` | CMS tạo mã phiên ghép nối khôi phục |
 | | `DELETE` | `/api/admin/device-pairings/{pairingId}` | `pairings:write` | CMS hủy phiên ghép nối |
@@ -252,8 +248,10 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
 
 ### 3.2. Nhóm Đăng ký & Ghép nối Thiết bị (ESP32 Onboarding & Pairing)
 
+Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác nhận sau proof sở hữu khóa; CMS chỉ theo dõi đăng ký. Luồng là `CHALLENGE → COMPLETED`, không chờ admin. Proof chỉ chứng minh sở hữu private key, không xác minh thiết bị thuộc tổ chức; mọi thiết bị gọi được endpoint và vượt qua kiểm tra hiện có có thể đăng ký vào site/scope được cấu hình trên backend. Không dùng đăng ký mới để thay khóa hay credential của máy đã có. Recovery/rotation giữ xác thực hiện hành.
+
 #### `POST /api/device-registrations`
-- **Mục đích:** ESP32 khởi tạo phiên đăng ký với server.
+- **Mục đích:** ESP32 khởi tạo phiên đăng ký; server lưu public key vào D1 `device_registrations` với state `CHALLENGE`, chưa cấp credential.
 - **Xác thực:** Công khai.
 - **Input (JSON Body):**
   ```json
@@ -268,63 +266,23 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
   {
     "registrationId": "reg_a1b2c3d4",
     "nonce": "random_43_chars_nonce...",
-    "claimSecret": "random_43_chars_secret...",
     "expiresAt": 1730000600000
   }
   ```
-  *(ESP32 phải lưu giữ `claimSecret` và `nonce` trong NVS để dùng cho các bước kế tiếp; phiên có hiệu lực 10 phút)*.
+  *(ESP32 phải giữ kín `nonce` để dùng cho bước hoàn tất; phiên có hiệu lực 10 phút. CMS không được nhận nonce)*.
 
 ---
 
-#### `POST /api/device-registrations/{registrationId}/submit`
-- **Mục đích:** ESP32 nộp chữ ký chứng minh sở hữu private key (Proof of Possession) để chuyển trạng thái đăng ký sang `PENDING` (chờ CMS duyệt).
+#### `POST /api/device-registrations/{registrationId}/complete`
+- **Mục đích:** ESP32 gửi lại nonce bí mật và chữ ký chứng minh sở hữu private key (Proof of Possession). Khi hợp lệ, một transaction D1 tự tạo hồ sơ máy, cấp credential, lưu khóa `ACTIVE` vào `qr_keys` và chuyển đăng ký sang `COMPLETED`; tên ban đầu là serial đã trim hoặc `hardwareTarget` nếu serial trống.
 - **Input (JSON Body):**
   ```json
   {
-    "claimSecret": "random_43_chars_secret...",
+    "nonce": "random_43_chars_nonce...",
     "proof": "base64url_signature_86_chars..."
   }
   ```
-  *(Message được ký: `REGISTER_SUBMIT_V1|<registrationId>|<nonce>|<keyId>`)*.
-- **Output:** `200 OK` Trả về `RegistrationMeta` có `state: "PENDING"`.
-
----
-
-#### `POST /api/device-registrations/{registrationId}/status`
-- **Mục đích:** ESP32 kiểm tra định kỳ trạng thái phê duyệt (poll không nhanh hơn 2 giây/lần).
-- **Input (JSON Body):**
-  ```json
-  {
-    "claimSecret": "random_43_chars_secret..."
-  }
-  ```
-- **Output:** `200 OK`
-  ```json
-  {
-    "registrationId": "reg_a1b2c3d4",
-    "deviceId": "door_01_hex_hoac_null",
-    "hardwareTarget": "esp32_wroom_32e",
-    "serial": "SN-ESP32-00123",
-    "publicKey": "...",
-    "keyId": "...",
-    "state": "APPROVED",
-    "createdAt": 1730000000000,
-    "expiresAt": 1730000600000
-  }
-  ```
-
----
-
-#### `POST /api/device-registrations/{registrationId}/claim`
-- **Mục đích:** Khi `state` là `APPROVED`, ESP32 gọi endpoint này để nhận token vận hành chính thức (chỉ gọi được duy nhất 1 lần).
-- **Input (JSON Body):**
-  ```json
-  {
-    "claimSecret": "random_43_chars_secret...",
-    "proof": "base64url_signature_86_chars..."
-  }
-  ```
-  *(Message được ký: `REGISTER_CLAIM_V1|<registrationId>|<nonce>|<keyId>`)*.
+  *(Message được ký chính xác UTF-8, không BOM/newline: `REGISTER_V1|<registrationId>|<nonce>|<keyId>`)*.
 - **Output:** `201 Created`
   ```json
   {
@@ -334,28 +292,16 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
     "token": "device_token_43_chars_base64url..."
   }
   ```
-  *(ESP32 lưu `token`, `deviceId`, `generation` vào NVS bền vững. Token này dùng làm `DeviceBearer`)*.
+  *(ESP32 lưu `token`, `deviceId`, `generation` vào NVS bền vững trước khi kết nối. Token này dùng làm `DeviceBearer`; `confirmedAt` vẫn chờ `BOOT_REPORT` hợp lệ. Challenge chỉ hoàn tất một lần: gọi lại không tạo thêm máy hoặc trả lại token. Mất response cần recovery có xác thực trên hồ sơ đã tạo, tra cứu qua CMS)*.
+- **Kiểm tra:** nonce sai không tăng số lần sai proof; nonce đúng nhưng proof sai đủ 5 lần khóa challenge. Hết hạn trả `410 REGISTRATION_EXPIRED`; challenge đã hoàn tất hoặc bị khóa trả lỗi `409`. Public key đã đăng ký không được gán sang máy mới.
 
 ---
 
-#### `POST /api/admin/device-registrations/{registrationId}/approve`
-- **Mục đích:** Người quản trị CMS phê duyệt thiết bị đang ở trạng thái `PENDING`.
-- **Quyền:** `pairings:write` và `devices:write`.
-- **Headers:** `Authorization`, `X-Actor-Id`, `Idempotency-Key`.
-- **Input (JSON Body):**
-  ```json
-  {
-    "name": "Cổng soát vé số 1"
-  }
-  ```
-- **Output:** `200 OK` `RegistrationMeta` có `state: "APPROVED"` và `deviceId` được cấp phát.
-
----
-
-#### `DELETE /api/admin/device-registrations/{registrationId}`
-- **Mục đích:** CMS từ chối yêu cầu đăng ký (chuyển sang `REJECTED`).
-- **Quyền:** `pairings:write`.
-- **Output:** `200 OK` `{ "ok": true }`.
+#### `GET /api/admin/device-registrations`
+- **Mục đích:** CMS theo dõi đăng ký trong site/scope được cấp, không trả nonce hoặc token.
+- **Quyền:** `devices:read`.
+- **Query Parameters:** `state` là `ALL`, `CHALLENGE`, `COMPLETED`, `LOCKED` hoặc `EXPIRED`; mặc định `ALL`. `cursor` và `limit` (1–100, mặc định 25) phân trang.
+- **Output:** `200 OK` `{ "items": [RegistrationMeta], "nextCursor": null }`.
 
 ---
 
@@ -395,7 +341,7 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
     "proof": "..."
   }
   ```
-  *(Message được ký: `PAIR_V1|<deviceId>|<pairingId>|<nonce>|<generation>|<keyId>`)*.
+  *(Message được ký: `PAIR_V1|<pairingId>|<deviceId>|<nonce>|<keyId>`)*.
 - **Output:** `201 Created`
   ```json
   {
@@ -473,7 +419,7 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
 ---
 
 #### `DELETE /api/admin/devices/{deviceId}`
-- **Mục đích:** Xóa thiết bị khỏi danh sách hoạt động, thu hồi token quản lý, hủy bỏ các khóa QR còn hiệu lực, hủy pairing/registration dở dang, xóa cấu hình Wi-Fi. Dữ liệu lịch sử audit và check-in vẫn được lưu giữ.
+- **Mục đích:** Xóa thiết bị khỏi danh sách hoạt động, thu hồi token quản lý, hủy bỏ các khóa QR còn hiệu lực, hủy pairing dở dang, xóa cấu hình Wi-Fi. Dữ liệu lịch sử audit và check-in vẫn được lưu giữ.
 - **Quyền:** `devices:write` và `credentials:revoke`.
 - **Output:** `200 OK` `{ "ok": true }`.
 

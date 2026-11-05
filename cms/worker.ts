@@ -29,8 +29,6 @@ const routes: [string, RegExp][] = [
     ["POST", /^\/devices\/[A-Za-z0-9_-]+\/(commands|upgrades|key-revocations)$/],
     ["DELETE", /^\/devices\/[A-Za-z0-9_-]+(\/credential)?$/],
     ["DELETE", /^\/device-pairings\/[A-Za-z0-9_-]+$/],
-    ["POST", /^\/device-registrations\/[A-Za-z0-9_-]+\/approve$/],
-    ["DELETE", /^\/device-registrations\/[A-Za-z0-9_-]+$/],
     ["PUT", /^\/devices\/[A-Za-z0-9_-]+\/firmware-target$/],
     ["GET", /^\/firmware-releases\/[A-Za-z0-9_-]+$/],
     ["PATCH", /^\/firmware-releases\/[A-Za-z0-9_-]+$/],

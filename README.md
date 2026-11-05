@@ -4,7 +4,7 @@ Hệ thống quản lý các máy phát QR tại đầu vào bảo tàng. ESP32 
 
 ## Hệ thống có gì
 
-- **Thiết bị:** ESP32 gửi yêu cầu đăng ký, CMS duyệt và đặt tên/vị trí. Xem kết nối, bật/tắt tiếp nhận check-in, cấu hình và lịch sử. Xóa máy sẽ thu hồi quyền kết nối/khóa QR, ẩn khỏi danh sách đang dùng; lịch sử được giữ lại.
+- **Thiết bị:** ESP32 gửi public key và chứng minh sở hữu private key; backend lưu D1 và tự duyệt đăng ký. CMS theo dõi tiến trình, xem kết nối, bật/tắt tiếp nhận check-in, cấu hình và lịch sử. Xóa máy sẽ thu hồi quyền kết nối/khóa QR, ẩn khỏi danh sách đang dùng; lịch sử được giữ lại.
 - **Bảo trì:** quét/chọn Wi-Fi nếu firmware hỗ trợ, lưu/áp dụng cấu hình, lấy trạng thái, khởi động lại, xóa Wi-Fi, đổi khóa QR và flash firmware cho một máy.
 - **Cài đặt chung:** SNTP/múi giờ, chính sách xác minh QR và tải firmware để cập nhật các máy được chọn.
 - **Check-in và Nhật ký:** xem lượt đã xác nhận, tên tương ứng với Subject / Scope, tên máy và hành động quản trị. ID phục vụ tra cứu nằm trong phần thu gọn.
@@ -48,9 +48,10 @@ bun run typecheck
 bun run typecheck:cms
 bun run build
 bun run build:cms
+bun run check:registrations
 ```
 
-Hai lệnh build chỉ kiểm tra/đóng gói local, không triển khai cloud.
+Hai lệnh build chỉ kiểm tra/đóng gói local, không triển khai cloud. `check:registrations` build và kiểm luồng tự đăng ký trên Workers runtime với D1 tạm: nonce/proof, hoàn tất một lần, gửi trùng/đồng thời, hết hạn, khóa do proof sai và quyền xem trên CMS.
 
 ## Triển khai Cloudflare
 
@@ -141,29 +142,30 @@ Mọi request S2S gửi `Authorization: Bearer <token>` và `X-Actor-Id: <ASCII-
 
 Wi-Fi ban đầu, TLS, SNTP, sinh/giữ khóa và lưu NVS do firmware triển khai. Không cần flash riêng mã pairing cho từng máy trong luồng đăng ký chính.
 
-### 1. Đăng ký và chờ CMS duyệt
+### 1. Đăng ký và tự xác nhận
 
-ESP32 tự sinh cặp **ECDSA P-256**, giữ private key trên máy. Public key là điểm uncompressed `04 || X[32] || Y[32]`, tổng 65 byte; mã hóa Base64URL canonical không padding thành 87 ký tự. Proof dùng ECDSA/SHA-256, chữ ký raw IEEE P1363 `r[32] || s[32]` big-endian, tổng 64 byte, Base64URL không padding thành 86 ký tự. Backend vẫn nhận khóa/proof Pure Ed25519 hiện có để giữ tương thích.
+ESP32 tự sinh cặp **ECDSA P-256**, giữ private key trên máy. Public key là điểm uncompressed `04 || X[32] || Y[32]`, tổng 65 byte; mã hóa Base64URL canonical không padding thành 87 ký tự. Proof dùng ECDSA/SHA-256, chữ ký raw IEEE P1363 `r[32] || s[32]` big-endian, tổng 64 byte, Base64URL không padding thành 86 ký tự. Backend cũng nhận khóa/proof Pure Ed25519.
 
 `keyId = Base64URL(SHA-256(rawPublicKey))`, luôn 43 ký tự. Đây là ID khóa của backend này; không dùng `kid` hex SHA-256 của SPKI DER trong heartbeat ở repo firmware thay thế. Firmware phải chuyển chữ ký DER nội bộ sang raw cho cả proof đăng ký, khôi phục ghép nối và rotation. Private key không gửi lên server.
 
 | Bước                   | Request                                                                                              | Kết quả                                                                    |
 | ---------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Tạo yêu cầu            | `POST /api/device-registrations` với `{publicKey,hardwareTarget,serial?}`                            | `{registrationId,nonce,claimSecret,expiresAt}`; lưu kín trước khi tiếp tục |
-| Chứng minh sở hữu khóa | `POST /api/device-registrations/:registrationId/submit` với `{claimSecret,proof}`                    | CMS thấy yêu cầu `PENDING`                                                 |
-| Chờ duyệt              | `POST /api/device-registrations/:registrationId/status` với `{claimSecret}`                          | Theo dõi state; poll không nhanh hơn 2 giây/lần                            |
-| Nhận quyền             | Khi `APPROVED`, gọi `POST /api/device-registrations/:registrationId/claim` với `{claimSecret,proof}` | `{deviceId,generation,keyId,token}` đúng một lần                           |
+| Tạo yêu cầu            | `POST /api/device-registrations` với `{publicKey,hardwareTarget,serial?}`                       | `{registrationId,nonce,expiresAt}`; lưu kín nonce trước khi tiếp tục       |
+| Hoàn tất đăng ký       | `POST /api/device-registrations/:registrationId/complete` với `{nonce,proof}`                   | `201 {deviceId,generation:1,keyId,token}` đúng một lần, không chờ CMS       |
 
 Ký chính xác UTF-8, không BOM/newline:
 
 ```text
-REGISTER_SUBMIT_V1|<registrationId>|<nonce>|<keyId>
-REGISTER_CLAIM_V1|<registrationId>|<nonce>|<keyId>
+REGISTER_V1|<registrationId>|<nonce>|<keyId>
 ```
 
-Admin mở **Thiết bị → Thiết bị chờ duyệt**, đối chiếu máy và nhập tên/vị trí để duyệt. Secret/token không hiện trong CMS. Phiên hết hạn sau 10 phút; state có `CHALLENGE`, `PENDING`, `APPROVED`, `CLAIMED`, `REJECTED`, `LOCKED`, `EXPIRED`. Sai proof đủ 5 lần bị khóa.
+Theo quyết định ngày 05/11/2026, public key được lưu ngay khi tạo challenge trong `device_registrations`. Sau proof hợp lệ tại `complete`, một transaction D1 tự tạo máy, cấp credential, lưu khóa `ACTIVE` vào `qr_keys` và chuyển đăng ký sang `COMPLETED`. Tên ban đầu là serial đã bỏ khoảng trắng đầu/cuối, hoặc `hardwareTarget` nếu serial trống. Nonce là bí mật của challenge, phải gửi lại tại `complete`; backend không cho người chỉ biết registrationId làm tăng số lần sai proof. `confirmedAt` và trạng thái kết nối vẫn chờ `BOOT_REPORT` hợp lệ.
 
-Lưu bền token/deviceId/generation trước khi kết nối. Mất response sau claim không được tự xin token khác; admin dùng **Khôi phục ghép nối** trên hồ sơ hiện có. Thiết bị có thể giữ nguyên khóa QR và ký proof cho phiên pairing mới; recovery tăng generation, cấp token mới và vô hiệu token cũ. Khóa đã thuộc máy khác không được chuyển sang máy này. Mất mạng đơn thuần dùng lại identity, không đăng ký máy mới. Schema đầy đủ: `src/registration-contracts.ts`; pairing phục hồi: `/api/device-pairings/complete` trong OpenAPI.
+Admin mở **Thiết bị → Đăng ký thiết bị** (`devices/registrations`) để theo dõi, không có bước duyệt/từ chối trên CMS. Nonce/token không hiện trong CMS. Phiên hết hạn sau 10 phút; state chỉ có `CHALLENGE`, `COMPLETED`, `LOCKED`, `EXPIRED`. Gửi đúng nonce nhưng sai proof đủ 5 lần bị khóa. Challenge chỉ hoàn tất một lần; gọi lại không tạo thêm máy hoặc trả lại token.
+
+Đăng ký mới là luồng công khai: proof chỉ chứng minh bên gọi sở hữu private key, không chứng minh thiết bị thuộc tổ chức. Thiết bị gọi được endpoint và vượt qua kiểm tra hiện có sẽ được tự đăng ký vào site/scope do backend cấu hình. Luồng này không cho phép lấy khóa mới tự khai để thay identity của máy đã có; recovery và rotation vẫn phải xác thực.
+
+Lưu bền token/deviceId/generation trước khi kết nối. Mất response sau `complete` không được tự xin token khác; admin dùng **Khôi phục ghép nối** trên hồ sơ đã tạo, tra cứu bằng đăng ký trên CMS. Thiết bị có thể giữ nguyên khóa QR và ký proof cho phiên pairing mới; recovery tăng generation, cấp token mới và vô hiệu token cũ. Khóa đã thuộc máy khác không được chuyển sang máy này. Mất mạng đơn thuần dùng lại identity, không đăng ký máy mới. Schema đầy đủ: `src/registration-contracts.ts`; pairing phục hồi: `/api/device-pairings/complete` trong OpenAPI.
 
 ### 2. WebSocket và BOOT
 
@@ -224,7 +226,7 @@ Firmware dùng deviceId đã nhận khi ghép nối. Máy đăng ký mới đư�
 
 Đặt `qrBaseUrl` thành `https://<api-host>/checkin` qua API cấu hình hiện có, rồi gửi `APPLY_CONFIG`; firmware cần hỗ trợ đọc/áp dụng cấu hình này và triển khai format trên. Không tự thay cấu hình máy hay đoán format từ URL. Khi thử `dev:cms`, `/checkin` cũng được chuyển tới backend trên cùng host cổng 8788; HTTP local dùng để dev, cấu hình URL thiết bị vẫn yêu cầu HTTPS. Dùng host HTTPS trỏ tới môi trường dev hoặc gọi URL local trực tiếp từ công cụ kiểm thử.
 
-Repo [firmware tại commit bf8039b](https://github.com/dongduy1412/vnfarm_qrcode/tree/bf8039bd8272f88105f2277176073557f4af9bbc) đã ký đúng định dạng QR này nhưng đang lấy `did` từ MAC, cố định URL theo build và gửi HTTP heartbeat `/api/devices/:did/ping`. Chưa có client đăng ký/claim và WebSocket của backend này. Đội firmware cần nối các bước ở mục 1–2, lưu và dùng deviceId server cấp, áp dụng đúng URL môi trường và giữ chu kỳ 30 giây. Backend không tự tin khóa từ MAC, không có endpoint nhập public key thủ công.
+Repo [firmware tại commit bf8039b](https://github.com/dongduy1412/vnfarm_qrcode/tree/bf8039bd8272f88105f2277176073557f4af9bbc) đã ký đúng định dạng QR này nhưng đang lấy `did` từ MAC, cố định URL theo build và gửi HTTP heartbeat `/api/devices/:did/ping`. Chưa có client đăng ký/complete và WebSocket của backend này. Đội firmware cần nối các bước ở mục 1–2, lưu và dùng deviceId server cấp, áp dụng đúng URL môi trường và giữ chu kỳ 30 giây. Backend không tự tin khóa từ MAC, không có endpoint nhập public key thủ công.
 
 `GET /checkin` không cần Bearer token, không lưu người chơi/check-in và không redirect. Hợp lệ trả `200`:
 

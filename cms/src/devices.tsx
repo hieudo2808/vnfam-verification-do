@@ -45,7 +45,7 @@ export function Devices() {
                     <h1>Thiết bị</h1>
                 </div>
                 <Button asChild>
-                    <Link to="pending">Thiết bị chờ duyệt</Link>
+                    <Link to="registrations">Đăng ký thiết bị</Link>
                 </Button>
             </div>
             <div className="filters">
@@ -397,25 +397,18 @@ function EnrollmentPanel({
             recover =
                 pendingRecovery ||
                 data.identity === "REPAIR_REQUIRED" ||
-                registration.state === "EXPIRED" ||
-                (registration.state === "CLAIMED" && data.identity !== "CONFIRMED");
+                (registration.state === "COMPLETED" && data.identity !== "CONFIRMED");
         const status =
             data.identity === "REPAIR_REQUIRED"
                 ? "Cần ghép lại."
                 : data.identity === "CONFIRMED"
                   ? "Đã kết nối"
-                  : registration.state === "CLAIMED"
-                    ? "Đã nhận cấu hình, chờ máy kết nối."
-                    : registration.state === "APPROVED"
-                      ? "Đã duyệt, chờ thiết bị nhận cấu hình."
-                      : registration.state === "EXPIRED"
-                        ? "Yêu cầu đã hết hạn."
-                        : registration.state;
+                  : "Đã đăng ký và cấp quyền kết nối, chờ máy kết nối.";
         return (
             <section>
                 <h2>Đăng ký thiết bị</h2>
                 <p>{status}</p>
-                <code>{registration.serial ?? registration.hardwareTarget}</code>
+                <code>{registration.serial?.trim() || registration.hardwareTarget}</code>
                 {recover && (
                     <details open={pendingRecovery}>
                         <summary>Khôi phục ghép nối</summary>

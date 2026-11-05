@@ -85,7 +85,10 @@ export function DeviceAdminModule({
                             <Routes>
                                 <Route path="devices" element={<Devices />} />
                                 <Route path="devices/new" element={<NewDevice />} />
-                                <Route path="devices/pending" element={<DeviceRegistrations />} />
+                                <Route
+                                    path="devices/registrations"
+                                    element={<DeviceRegistrations />}
+                                />
                                 <Route path="devices/:deviceId" element={<DeviceDetail />} />
                                 <Route path="settings" element={<SettingsLayout />}>
                                     <Route index element={<Navigate to="firmware" replace />} />

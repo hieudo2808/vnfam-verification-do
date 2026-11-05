@@ -89,10 +89,9 @@ CREATE TABLE device_runtime_status (
 CREATE TABLE device_registrations (
  registrationId TEXT PRIMARY KEY, siteId TEXT NOT NULL, scopeId TEXT NOT NULL,
  publicKey TEXT NOT NULL, keyId TEXT NOT NULL, hardwareTarget TEXT NOT NULL, serial TEXT,
- nonce TEXT NOT NULL, secretHash TEXT NOT NULL,
- state TEXT NOT NULL CHECK(state IN('CHALLENGE','PENDING','APPROVED','CLAIMED','REJECTED','LOCKED','EXPIRED')),
+ nonce TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN('CHALLENGE','COMPLETED','LOCKED','EXPIRED')),
  attempts INTEGER NOT NULL DEFAULT 0, deviceId TEXT REFERENCES devices(deviceId),
  createdAt INTEGER NOT NULL, expiresAt INTEGER NOT NULL
 );
-CREATE UNIQUE INDEX one_registration_request_key ON device_registrations(keyId) WHERE state IN('PENDING','APPROVED');
 CREATE INDEX registrations_scope ON device_registrations(siteId,scopeId,state,registrationId);
