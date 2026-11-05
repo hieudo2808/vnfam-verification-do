@@ -28,6 +28,7 @@ export function Devices() {
         [pages, setPages] = useState<string[]>([]),
         cursor = pages.at(-1);
     const q = new URLSearchParams(params);
+    q.delete("identity");
     if (cursor) q.set("cursor", cursor);
     const list = useRead("/device-summaries?" + q, S.pageOf(C.Summary));
     const filter = (key: string, value: string) => {
@@ -50,19 +51,6 @@ export function Devices() {
                         value={params.get("q") ?? ""}
                         onChange={(e) => filter("q", e.target.value)}
                     />
-                </Field>
-                <Field label="Danh tính">
-                    <select
-                        value={params.get("identity") ?? ""}
-                        onChange={(e) => filter("identity", e.target.value)}
-                    >
-                        <option value="">Tất cả</option>
-                        {C.Identity.options.map((s) => (
-                            <option key={s} value={s}>
-                                {operationLabel(s)}
-                            </option>
-                        ))}
-                    </select>
                 </Field>
                 <Field label="Kết nối">
                     <select
@@ -97,7 +85,6 @@ export function Devices() {
                                 <thead>
                                     <tr>
                                         <th>Thiết bị / Vị trí</th>
-                                        <th>Danh tính</th>
                                         <th>Kết nối</th>
                                         <th>Tiếp nhận</th>
                                         <th>Firmware / Thao tác</th>
@@ -110,7 +97,6 @@ export function Devices() {
                                                 <Link to={s.device.deviceId}>{s.device.name}</Link>
                                                 <code>{s.device.deviceId}</code>
                                             </td>
-                                            <td>{operationLabel(s.identity)}</td>
                                             <td>
                                                 {connectionLabel(s.connection.state)}
                                                 <small>
@@ -228,7 +214,6 @@ function Detail({ deviceId }: { deviceId: string }) {
                             <code>{deviceId}</code>
                         </p>
                         <div className="status-strip">
-                            <span>{operationLabel(d.identity)}</span>
                             <span>
                                 {connectionLabel(d.connection.state)} —{" "}
                                 <Stamp value={d.connection.observedAt} />
@@ -290,9 +275,9 @@ function Detail({ deviceId }: { deviceId: string }) {
                                             {d.device.hardwareTarget ?? "—"} /{" "}
                                             {d.device.otaSlotBytes ?? "—"} byte
                                         </dd>
-                                        <dt>Capabilities</dt>
+                                        <dt>Thời gian kết nối lần đầu</dt>
                                         <dd>
-                                            {d.device.capabilities.join(", ") || "Chưa có BOOT"}
+                                            <Stamp value={d.device.confirmedAt} />
                                         </dd>
                                     </dl>
                                 </section>
