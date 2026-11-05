@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import * as S from "../../src/contracts";
 import * as C from "../../src/cms-contracts";
+import * as R from "../../src/runtime-contracts";
 import { Button } from "./components/ui/button";
 import {
     BridgeContext,
@@ -84,7 +85,7 @@ export function Devices() {
                                 <caption className="sr-only">Danh sách thiết bị</caption>
                                 <thead>
                                     <tr>
-                                        <th>Thiết bị / Vị trí</th>
+                                        <th>Tên / vị trí máy</th>
                                         <th>Kết nối</th>
                                         <th>Tiếp nhận</th>
                                         <th>Firmware / Thao tác</th>
@@ -275,10 +276,11 @@ function Detail({ deviceId }: { deviceId: string }) {
                                             {d.device.hardwareTarget ?? "—"} /{" "}
                                             {d.device.otaSlotBytes ?? "—"} byte
                                         </dd>
-                                        <dt>Thời gian kết nối lần đầu</dt>
+                                        <dt>Kết nối xác nhận gần nhất</dt>
                                         <dd>
                                             <Stamp value={d.device.confirmedAt} />
                                         </dd>
+                                        <ReportedStatus deviceId={deviceId} />
                                     </dl>
                                 </section>
                                 <DeleteDevice device={d.device} />
@@ -295,6 +297,33 @@ function Detail({ deviceId }: { deviceId: string }) {
                     </>
                 )}
             </ReadState>
+        </>
+    );
+}
+function ReportedStatus({ deviceId }: { deviceId: string }) {
+    const query = useRead("/devices/" + deviceId + "/runtime-settings", R.RuntimeSettings),
+        status = query.data?.status,
+        time = status?.time;
+    return (
+        <>
+            <dt>Wi-Fi đang dùng (máy báo)</dt>
+            <dd>{status?.wifiSsid ?? "Chưa có thông tin"}</dd>
+            <dt>Đồng bộ giờ (máy báo)</dt>
+            <dd>
+                {time?.status === "SYNCED"
+                    ? "Đã đồng bộ"
+                    : time?.status === "ERROR"
+                      ? "Lỗi đồng bộ"
+                      : time?.status === "UNSYNCED"
+                        ? "Chưa đồng bộ"
+                        : "Chưa có thông tin"}
+            </dd>
+            <dt>Thời điểm máy báo thông tin</dt>
+            <dd>
+                <ReadState query={query}>
+                    {query.data && <Stamp value={status?.observedAt ?? null} />}
+                </ReadState>
+            </dd>
         </>
     );
 }

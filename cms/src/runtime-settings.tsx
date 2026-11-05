@@ -175,8 +175,9 @@ export function NetworkConfigPanel({
                 {query.data && (
                     <>
                         <p>
-                            Đã lưu: phiên bản {network!.revision} · Máy đã áp dụng:{" "}
-                            {network!.appliedRevision}.
+                            {network!.appliedRevision === network!.revision
+                                ? "Máy đã áp dụng cấu hình đã lưu."
+                                : "Cấu hình đã lưu chưa được máy xác nhận áp dụng."}
                         </p>
                         <form
                             onSubmit={form.handleSubmit(async (input) => {
