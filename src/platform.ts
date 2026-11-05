@@ -41,6 +41,10 @@ export type OperationRow = Omit<z.infer<typeof Operation>, "payload" | "result">
     result: string | null;
 };
 export const db = (env: Env) => env.DB.withSession("first-primary");
+export const configWriteGuard = (env: Env, deviceId: string, generation: number) =>
+    env.DB.prepare(
+        "INSERT INTO transaction_guard SELECT NOT EXISTS(SELECT 1 FROM operations WHERE deviceId=? AND generation=? AND action='APPLY_CONFIG' AND state IN('CREATED','SENT','ACKNOWLEDGED','RUNNING','UNKNOWN'))"
+    ).bind(deviceId, generation);
 export async function service(c: Ctx, permission: string): Promise<Principal> {
     const token = bearer(c.req.header("authorization"));
     const row = await db(c.env)

@@ -12,7 +12,6 @@ import { prepareFirmware, type FirmwarePackage } from "./firmware-upload";
 import { DeploymentItem, resumeDeployment } from "./deployment";
 import { targetReason } from "./compatibility";
 import { OperationDialog } from "./maintenance";
-export { validateArtifact } from "./firmware-package";
 
 const UploadIntent = z.strictObject({ releaseId: S.Id, createKey: S.Id, approveKey: S.Id });
 function savedUpload(storage: string) {

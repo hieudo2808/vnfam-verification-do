@@ -83,6 +83,118 @@ try {
         sig: await id.sign("v1." + completed.deviceId + "." + t) });
     assert.equal((await fetch(base + "/checkin?" + qr)).status, 200);
 
+    const columns = await db.prepare("PRAGMA table_info(devices)").all<{ name: string }>();
+    for (const removed of ["doorId", "configRevision", "appliedRevision"])
+        assert.equal(columns.results.some((column: { name: string }) => column.name === removed), false);
+    const cms = (suffix: string, method = "GET", input?: unknown, key = crypto.randomUUID()) =>
+        fetch(base + "/cms-api/devices/" + completed.deviceId + suffix, {
+            method,
+            headers: { "content-type": "application/json", origin: base, "idempotency-key": key },
+            ...(input === undefined ? {} : { body: JSON.stringify(input) }),
+        });
+    assert.equal((await cms("", "PATCH", { name: "Cửa chính" })).status, 200);
+    const overview = await (await cms("/overview")).json() as Record<string, unknown>;
+    const overviewDevice = overview.device as Record<string, unknown>;
+    assert.equal(overviewDevice.name, "Cửa chính");
+    assert.equal(overview.activeKeyId, id.keyId);
+    for (const removed of ["keys", "config", "lastSyncedAtMs", "doorId", "configRevision", "appliedRevision"])
+        assert.equal(removed in overview || removed in overviewDevice, false);
+    assert.equal((await cms("/network-config", "PATCH", { ssid: "LobbyWifi", password: "test-password" })).status, 200);
+
+    const connection = await mf.dispatchFetch(base + "/api/devices/" + completed.deviceId + "/connection", {
+        headers: { upgrade: "websocket", authorization: "Bearer " + completed.token },
+    });
+    assert.equal(connection.status, 101);
+    const ws = connection.webSocket!;
+    type Message = { type: string; operationId?: string; payload: Record<string, unknown> };
+    const inbox: Message[] = [];
+    const waiters: (() => void)[] = [];
+    ws.addEventListener("message", (event) => {
+        inbox.push(JSON.parse(String(event.data)) as Message);
+        waiters.splice(0).forEach((wake) => wake());
+    });
+    async function message(type: string) {
+        const deadline = Date.now() + 5000;
+        while (true) {
+            const index = inbox.findIndex((item) => item.type === type);
+            if (index !== -1) return inbox.splice(index, 1)[0]!;
+            assert.ok(Date.now() < deadline, "Missing WebSocket message: " + type + "; received " + JSON.stringify(inbox));
+            await new Promise<void>((resolve) => {
+                const timer = setTimeout(resolve, 100);
+                waiters.push(() => { clearTimeout(timer); resolve(); });
+            });
+        }
+    }
+    ws.accept();
+    await message("WELCOME");
+    ws.send(JSON.stringify({ version: 1, type: "BOOT_REPORT", eventId: crypto.randomUUID(), payload: {
+        bootId: "boot_test", keyId: id.keyId, hardwareTarget: "esp32_check", firmwareVersion: "1.0.0",
+        buildId: "build_test", otaSlotBytes: 1024 * 1024, capabilities: ["APPLY_CONFIG"], healthy: true,
+        runtimeConfigVersion: 1, wifiSsid: "OldWifi",
+    } }));
+    await message("EVENT_ACK");
+    const applyResponse = await cms("/commands", "POST", { action: "APPLY_CONFIG" });
+    assert.equal(applyResponse.status, 202, await applyResponse.clone().text());
+    const apply = await applyResponse.json() as { operationId: string; payload: Record<string, unknown> };
+    const command = await message("COMMAND");
+    assert.equal(command.operationId, apply.operationId);
+    assert.equal("revision" in apply.payload, false);
+    const state = async () => (await db.prepare("SELECT state FROM operations WHERE operationId=?")
+        .bind(apply.operationId).first<{ state: string }>())!.state;
+    assert.equal(await state(), "SENT");
+    const blockedEdits = async () => {
+        assert.equal((await cms("/network-config", "PATCH", { ssid: "OtherWifi", password: "other-password" })).status, 409);
+        assert.equal((await cms("/config", "PATCH", { scopeId: "scope", qrBaseUrl: "https://example.com/qr" })).status, 409);
+    };
+    await blockedEdits();
+    await db.prepare("UPDATE operations SET state='UNKNOWN' WHERE operationId=?").bind(apply.operationId).run();
+    await blockedEdits();
+    const download = await fetch(base + "/api/devices/" + completed.deviceId + "/network-config?operationId=" + apply.operationId, {
+        headers: { authorization: "Bearer " + completed.token },
+    });
+    assert.equal(download.status, 200);
+    assert.deepEqual(await download.json(), { ssid: "LobbyWifi", password: "test-password" });
+    const result = (ssid: string) => ws.send(JSON.stringify({ version: 1, type: "COMMAND_RESULT",
+        eventId: crypto.randomUUID(), operationId: apply.operationId,
+        payload: { success: true, runtimeConfigVersion: 1, wifiSsid: ssid },
+    }));
+    result("WrongWifi");
+    assert.equal((await message("ERROR")).payload.code, "RESULT_EVIDENCE_REQUIRED");
+    assert.equal(await state(), "UNKNOWN");
+    result("LobbyWifi");
+    await message("EVENT_ACK");
+    assert.equal(await state(), "SUCCEEDED");
+    assert.equal((await cms("/network-config", "PATCH", { ssid: "LobbyWifi" })).status, 200);
+    ws.close();
+
+    const revokeIntent = crypto.randomUUID();
+    assert.equal((await cms("/key-revocations", "POST", { keyId: id.keyId }, revokeIntent)).status, 200);
+    const rotated = await identity();
+    await db.prepare("INSERT INTO qr_keys VALUES(?,?,?,?,'ACTIVE',NULL,?)")
+        .bind(rotated.keyId, completed.deviceId, 1, rotated.publicKey, Date.now()).run();
+    const rotatedState = async () => (await db.prepare("SELECT state FROM qr_keys WHERE keyId=?")
+        .bind(rotated.keyId).first<{ state: string }>())!.state;
+    const revokeReplay = await cms("/key-revocations", "POST", { keyId: id.keyId }, revokeIntent);
+    assert.equal(revokeReplay.status, 200);
+    assert.equal(revokeReplay.headers.get("idempotency-replayed"), "true");
+    assert.equal((await cms("/key-revocations", "POST", { keyId: id.keyId })).status, 409);
+    assert.equal(await rotatedState(), "ACTIVE");
+    assert.equal((await (await cms("/overview")).json() as { activeKeyId: string }).activeKeyId, rotated.keyId);
+    // Simulate the generation change used by recovery: stale key metadata must not target the new identity.
+    await db.prepare("UPDATE operations SET state='UNKNOWN' WHERE operationId=?").bind(apply.operationId).run();
+    await db.prepare("UPDATE devices SET generation=2 WHERE deviceId=?").bind(completed.deviceId).run();
+    assert.equal((await cms("/network-config", "PATCH", { ssid: "LobbyWifi" })).status, 200);
+    assert.equal((await (await cms("/overview")).json() as { activeKeyId: string | null }).activeKeyId, null);
+    assert.equal((await cms("/key-revocations", "POST", { keyId: rotated.keyId })).status, 409);
+    assert.equal(await rotatedState(), "ACTIVE");
+    const recovered = await identity();
+    await db.prepare("UPDATE qr_keys SET state='REVOKED' WHERE deviceId=?").bind(completed.deviceId).run();
+    await db.prepare("INSERT INTO qr_keys VALUES(?,?,?,?,'ACTIVE',NULL,?)")
+        .bind(recovered.keyId, completed.deviceId, 2, recovered.publicKey, Date.now()).run();
+    assert.equal((await cms("/key-revocations", "POST", { keyId: rotated.keyId })).status, 409);
+    assert.equal((await (await cms("/overview")).json() as { activeKeyId: string }).activeKeyId, recovered.keyId);
+    assert.equal((await cms("/key-revocations", "POST", { keyId: recovered.keyId })).status, 200);
+
     const retryId = await identity(), retry = await create(retryId, "   ");
     const retryProof = await signed(retryId, retry);
     const retries = await Promise.all([
@@ -138,7 +250,7 @@ try {
         Object.keys(openapi.paths).some((p) => p.includes("device-registrations/") && p.endsWith("/" + removed)), false
     );
     assert.ok(openapi.paths["/api/device-registrations/{registrationId}/complete"]);
-    console.log("Registration workerd checks passed: proof, nonce protection, automatic enrollment, token, races, revocation, expiry, lockout, CMS scopes and removed approval flow.");
+    console.log("Registration/device workerd checks passed: automatic enrollment, proof, races, expiry, lockout, CMS cleanup, config dispatch/download/results, edit guards and exact-key revocation/replay across generations.");
 } finally {
     await mf.dispose();
 }

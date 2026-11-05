@@ -49,7 +49,7 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
 - `401 Unauthorized`: Thiếu hoặc sai Bearer token, hoặc chữ ký điện tử không hợp lệ.
 - `403 Forbidden`: Token không đủ quyền hạn (permission) hoặc ngoài phạm vi (site/scope).
 - `404 Not Found`: Không tìm thấy thiết bị, bản ghi, firmware hoặc thao tác tương ứng.
-- `409 Conflict`: Xung đột phiên bản cấu hình (`REVISION_CONFLICT`), trùng khóa hoặc thao tác không hợp lệ với trạng thái hiện tại.
+- `409 Conflict`: Xung đột cài đặt thời gian dùng chung (`REVISION_CONFLICT`), trùng khóa hoặc thao tác không hợp lệ với trạng thái hiện tại.
 - `410 Gone`: Phiên đăng ký hoặc mã QR đã hết hạn hiệu lực.
 - `413 Payload Too Large`: Payload vượt quá giới hạn (mặc định 64 KiB; nhị phân firmware tối đa 8 MiB).
 - `422 Unprocessable Content`: Dữ liệu không thỏa mãn validation schema (Zod) hoặc chữ ký proof không hợp lệ.
@@ -81,8 +81,8 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
 | | `GET` | `/api/admin/devices/{deviceId}` | `devices:read` | Chi tiết thiết bị + trạng thái online |
 | | `PATCH` | `/api/admin/devices/{deviceId}` | `devices:write` | Sửa tên, vị trí, bật/tắt tiếp nhận |
 | | `DELETE` | `/api/admin/devices/{deviceId}` | `devices:write` & `credentials:revoke` | Xóa máy khỏi danh sách, thu hồi truy cập |
-| | `GET` | `/api/admin/devices/{deviceId}/config` | `devices:read` | Đọc cấu hình mong muốn và áp dụng |
-| | `PATCH` | `/api/admin/devices/{deviceId}/config` | `devices:write` | Sửa cấu hình mong muốn (tăng revision) |
+| | `GET` | `/api/admin/devices/{deviceId}/config` | `devices:read` | Đọc cấu hình mong muốn |
+| | `PATCH` | `/api/admin/devices/{deviceId}/config` | `devices:write` | Sửa cấu hình mong muốn |
 | | `DELETE` | `/api/admin/devices/{deviceId}/credential` | `credentials:revoke` | Thu hồi ngay token của thiết bị |
 | | `POST` | `/api/admin/devices/{deviceId}/key-revocations` | `keys:revoke` | Thu hồi ngay khóa QR của thiết bị |
 | **Lệnh & Tác vụ** | `POST` | `/api/admin/devices/{deviceId}/commands` | `commands:write` | Gửi lệnh vận hành tới ESP32 |
@@ -92,7 +92,7 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
 | | `GET` | `/api/admin/devices/{deviceId}/events` | `audit:read` | Xem sự kiện kiểm toán của máy |
 | **Tổng quan CMS** | `GET` | `/api/admin/context` | `devices:read` | Lấy danh sách quyền và phạm vi của token |
 | | `GET` | `/api/admin/device-summaries` | `devices:read` | Danh sách snapshot tổng hợp máy cho CMS |
-| | `GET` | `/api/admin/devices/{deviceId}/overview` | `devices:read` | Chi tiết toàn diện máy, phím, tiến độ |
+| | `GET` | `/api/admin/devices/{deviceId}/overview` | `devices:read` | Chi tiết máy, trạng thái kết nối và tiến độ thao tác |
 | | `GET` | `/api/admin/audit-events` | `audit:read` | Lịch sử audit thô toàn hệ thống |
 | | `GET` | `/api/admin/audit-summaries` | `audit:read` | Lịch sử audit làm giàu (tên máy, actor) |
 | **Cấu hình Giờ & Mạng** | `GET` | `/api/admin/time-settings` | `devices:read` | Đọc cài đặt máy chủ SNTP toàn cục |
@@ -246,7 +246,7 @@ Mọi endpoint thuộc `/api/*` khi phát sinh lỗi đều trả về JSON có 
 
 ### 3.2. Nhóm Đăng ký & Ghép nối Thiết bị (ESP32 Onboarding & Pairing)
 
-Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác nhận sau proof sở hữu khóa; CMS chỉ theo dõi đăng ký. Luồng là `CHALLENGE → COMPLETED`, không chờ admin. Proof chỉ chứng minh sở hữu private key, không xác minh thiết bị thuộc tổ chức; mọi thiết bị gọi được endpoint và vượt qua kiểm tra hiện có có thể đăng ký vào site/scope được cấu hình trên backend. Không dùng đăng ký mới để thay khóa hay credential của máy đã có. Recovery/rotation giữ xác thực hiện hành.
+Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác nhận sau proof sở hữu khóa; thiết bị tự tạo xuất hiện trong danh sách Thiết bị, CMS không có màn hình đăng ký riêng. Luồng là `CHALLENGE → COMPLETED`, không chờ admin. Proof chỉ chứng minh sở hữu private key, không xác minh thiết bị thuộc tổ chức; mọi thiết bị gọi được endpoint và vượt qua kiểm tra hiện có có thể đăng ký vào site/scope được cấu hình trên backend. Không dùng đăng ký mới để thay khóa hay credential của máy đã có. Recovery/rotation giữ xác thực hiện hành.
 
 #### `POST /api/device-registrations`
 - **Mục đích:** ESP32 khởi tạo phiên đăng ký; server lưu public key vào D1 `device_registrations` với state `CHALLENGE`, chưa cấp credential.
@@ -346,6 +346,8 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
 
 ### 3.3. Nhóm Quản trị Thiết bị (Device Management)
 
+Trường `name` lưu tên/vị trí hiển thị của máy; không có trường vị trí riêng. Cấu hình từng máy không có số phiên bản đã lưu hoặc đã áp dụng; kết quả áp dụng được đối chiếu theo `operationId`.
+
 #### `GET /api/admin/devices`
 - **Mục đích:** Xem danh sách thiết bị thuộc phạm vi của token quản trị.
 - **Quyền:** `devices:read`.
@@ -358,15 +360,12 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
         "deviceId": "door_01",
         "name": "Cổng soát vé 1",
         "siteId": "museum_01",
-        "doorId": "door_01",
         "scopeId": "museum_main",
         "qrBaseUrl": "https://devices.castorice.tech/checkin",
         "checkInEnabled": true,
         "generation": 1,
         "pairedAt": 1730000000000,
         "confirmedAt": 1730000050000,
-        "configRevision": 2,
-        "appliedRevision": 2,
         "firmwareTarget": null,
         "bootId": "boot_123",
         "hardwareTarget": "esp32_board_01",
@@ -400,7 +399,6 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
   {
     "name": "Cửa soát vé Tây 2",
     "siteId": "museum_01",
-    "doorId": "door_w2",
     "checkInEnabled": true
   }
   ```
@@ -421,19 +419,16 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
 - **Input Body (PATCH):**
   ```json
   {
-    "revision": 2,
     "scopeId": "scope_new",
     "qrBaseUrl": "https://devices.castorice.tech/checkin"
   }
   ```
-  *(Cơ chế Optimistic Concurrency: `revision` gửi lên phải bằng đúng `configRevision` hiện tại của máy; khi lưu thành công server sẽ tăng lên 1)*.
+  *(Không dùng số phiên bản cấu hình. Không được sửa khi có lệnh `APPLY_CONFIG` đang chạy hoặc chưa rõ kết quả `UNKNOWN`)*.
 - **Output:** `200 OK`
   ```json
   {
-    "revision": 3,
     "scopeId": "scope_new",
-    "qrBaseUrl": "https://devices.castorice.tech/checkin",
-    "appliedRevision": 2
+    "qrBaseUrl": "https://devices.castorice.tech/checkin"
   }
   ```
 
@@ -498,6 +493,15 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
 
 ---
 
+#### `POST /api/admin/devices/{deviceId}/key-revocations`
+- **Mục đích:** Thu hồi khóa đang dùng để ký mã QR của thiết bị.
+- **Quyền:** `keys:revoke`.
+- **Headers:** `Authorization`, `X-Actor-Id`, `Idempotency-Key`.
+- **Input:** `{ "keyId": "<activeKeyId>" }`, lấy mã khóa hiện hành từ `overview.activeKeyId`. Backend chỉ thu hồi đúng khóa được chỉ định, không tự chọn một khóa mới nếu máy đã đổi khóa trong lúc thao tác.
+- **Output:** `200 OK` `{ "ok": true }`.
+
+---
+
 ### 3.4. Nhóm Tổng hợp CMS (CMS Summaries & Context)
 
 #### `GET /api/admin/context`
@@ -530,12 +534,11 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
 - **Output:** `200 OK` Trả về `Overview` bao gồm:
   - Thông tin thiết bị (`device`).
   - Trạng thái kết nối (`connection`) & định danh (`identity`).
-  - Cấu hình mong muốn & áp dụng (`config`).
   - Phiên pairing gần nhất (`pairing`).
-  - Danh sách các khóa QR đã đăng ký (`keys`).
+  - Mã khóa đang dùng ở lần ghép nối hiện hành (`activeKeyId`), hoặc `null` nếu không có; chỉ phục vụ thao tác thu hồi, không hiển thị trên giao diện.
   - 10 thao tác gần nhất kèm phần trăm tiến độ nếu có (`recentOperations`).
-  - Thời điểm đồng bộ SNTP thành công gần nhất (`lastSyncedAtMs`).
   - Thời gian server (`serverTimeMs`).
+- Không trả public key hoặc lịch sử khóa xuống browser. Wi-Fi và giờ máy báo được đọc qua `/runtime-settings`; cấu hình mong muốn được đọc qua `/config`.
 
 ---
 
@@ -578,8 +581,6 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
   ```json
   {
     "network": {
-      "revision": 2,
-      "appliedRevision": 2,
       "ssid": "Museum_Staff_WiFi",
       "passwordConfigured": true
     },
@@ -595,7 +596,6 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
       "wifiSsid": "Museum_Staff_WiFi",
       "time": {
         "server": "time.google.com",
-        "configRevision": 2,
         "deviceTimeMs": 1730000000000,
         "syncedAtMs": 1729999000000,
         "status": "SYNCED"
@@ -608,22 +608,20 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
 
 #### `PATCH /api/admin/devices/{deviceId}/network-config`
 - **Mục đích:** CMS cập nhật cấu hình Wi-Fi mới cho thiết bị. Mật khẩu được mã hóa bảo mật AES-GCM 256-bit với `CONFIG_ENCRYPTION_KEY` trước khi lưu vào D1.
+- Không dùng số phiên bản cấu hình. Không được sửa khi có lệnh `APPLY_CONFIG` đang chạy hoặc chưa rõ kết quả `UNKNOWN`.
 - **Quyền:** `devices:write`.
 - **Headers:** `Authorization`, `X-Actor-Id`, `Idempotency-Key`.
 - **Input (JSON Body):**
   ```json
   {
-    "revision": 2,
     "ssid": "Museum_Staff_WiFi",
     "password": "SecretWiFiPassword123"
   }
   ```
-  *(Nếu chỉ đổi cấu hình khác mà giữ nguyên mật khẩu cũ, có thể không truyền trường `password`)*.
+  *(Có thể bỏ trường `password` để giữ mật khẩu đã lưu khi SSID không đổi. Khi đổi SSID phải gửi mật khẩu mới; gửi chuỗi rỗng nếu mạng không có mật khẩu)*.
 - **Output:** `200 OK`
   ```json
   {
-    "revision": 3,
-    "appliedRevision": 2,
     "ssid": "Museum_Staff_WiFi",
     "passwordConfigured": true
   }
@@ -633,13 +631,13 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
 
 #### `GET /api/devices/{deviceId}/network-config`
 - **Mục đích:** ESP32 lấy cấu hình SSID và mật khẩu dạng rõ để nạp vào chip Wi-Fi. Endpoint này **chỉ cho phép truy cập** khi thiết bị đang ở trong trạng thái thực thi lệnh `APPLY_CONFIG` hợp lệ.
+- Thiết bị báo kết quả theo đúng `operationId`; khi lệnh có Wi-Fi, kết quả thành công phải có `runtimeConfigVersion: 1` và `wifiSsid` khớp tên mạng được giao. Không gửi số phiên bản cấu hình.
 - **Xác thực:** `DeviceBearer`.
 - **Query Parameter:**
   - `operationId`: ID của tác vụ `APPLY_CONFIG` tương ứng.
 - **Output:** `200 OK`
   ```json
   {
-    "revision": 3,
     "ssid": "Museum_Staff_WiFi",
     "password": "SecretWiFiPassword123"
   }
@@ -733,10 +731,8 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
     "deviceId": "door_01",
     "generation": 1,
     "config": {
-      "revision": 2,
       "scopeId": "museum_main",
-      "qrBaseUrl": "https://devices.castorice.tech/checkin",
-      "appliedRevision": 2
+      "qrBaseUrl": "https://devices.castorice.tech/checkin"
     },
     "firmwareTarget": "rel_v1_0_1",
     "serverTimeMs": 1730000000000,
@@ -780,7 +776,6 @@ Quyết định ngày 05/11/2026: backend lưu public key trong D1 và tự xác
        "buildId": "bld_01",
        "otaSlotBytes": 2097152,
        "capabilities": ["REQUEST_STATUS", "APPLY_CONFIG", "REBOOT", "UPGRADE_FIRMWARE"],
-       "appliedRevision": 2,
        "healthy": true,
        "runtimeConfigVersion": 1,
        "wifiSsid": "Museum_WiFi"

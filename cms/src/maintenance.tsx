@@ -19,7 +19,6 @@ import { Button } from "./components/ui/button";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "./components/ui/dialog";
 import { NetworkConfigPanel } from "./runtime-settings";
 import { DeviceFirmwarePanel } from "./firmware";
-export { NetworkConfigPanel as ConfigForm } from "./runtime-settings";
 const actionNames: Record<string, string> = {
     REQUEST_STATUS: "Lấy trạng thái mới",
     SCAN_WIFI: "Quét Wi-Fi",
@@ -99,7 +98,7 @@ export function Maintenance({ data }: { data: z.infer<typeof C.Overview> }) {
             }
             if (action === "REVOKE_KEY") {
                 endpoint = path + "/key-revocations";
-                body = { keyId: data.keys.find((k) => k.state === "ACTIVE")?.keyId };
+                body = { keyId: data.activeKeyId };
             }
             if (!action.startsWith("REVOKE")) {
                 saveIntent(device.deviceId, key);
@@ -162,7 +161,7 @@ export function Maintenance({ data }: { data: z.infer<typeof C.Overview> }) {
                             variant="destructive"
                             key={a}
                             disabled={
-                                a === "REVOKE_KEY" && !data.keys.some((k) => k.state === "ACTIVE")
+                                a === "REVOKE_KEY" && !data.activeKeyId
                             }
                             onClick={() => setSelected(a)}
                         >
@@ -291,9 +290,6 @@ export function OperationRow({
                           ? "Cấu hình trên máy đã đúng, không cần thay đổi."
                           : "Lý do: " + String(o.result.reason)}
                 </p>
-            )}
-            {o.result?.revision !== undefined && (
-                <p>Phiên bản cấu hình máy báo: {String(o.result.revision)}</p>
             )}
             {!!o.result?.buildId && <p>Build thực tế: {String(o.result.buildId)}</p>}
             {o.state === "UNKNOWN" && (

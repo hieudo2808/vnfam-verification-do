@@ -140,7 +140,6 @@ export function NetworkConfigPanel({
     disabledReason = "Chưa có thao tác áp dụng.",
 }: {
     deviceId: string;
-    config?: unknown;
     onApply?: () => void;
     scanSupported?: boolean;
     scanDisabledReason?: string;
@@ -156,29 +155,22 @@ export function NetworkConfigPanel({
         [openNetworkSsid, setOpenNetworkSsid] = useState<string | null>(null);
     const form = useForm({
         resolver: zodResolver(R.NetworkInput),
-        defaultValues: { revision: 1, ssid: "", password: undefined as string | undefined },
+        defaultValues: { ssid: "", password: undefined as string | undefined },
     });
     const dirty = form.formState.isDirty;
     useEffect(() => {
         if (query.data && !dirty)
             form.reset({
-                revision: query.data.network.revision,
                 ssid: query.data.network.ssid ?? "",
                 password: undefined,
             });
     }, [query.data, dirty]);
-    const network = query.data?.network;
     return (
         <section>
             <h2>Cấu hình</h2>
             <ReadState query={query}>
                 {query.data && (
                     <>
-                        <p>
-                            {network!.appliedRevision === network!.revision
-                                ? "Máy đã áp dụng cấu hình đã lưu."
-                                : "Cấu hình đã lưu chưa được máy xác nhận áp dụng."}
-                        </p>
                         <form
                             onSubmit={form.handleSubmit(async (input) => {
                                 setError(undefined);
@@ -198,7 +190,6 @@ export function NetworkConfigPanel({
                                         )
                                     );
                                     form.reset({
-                                        revision: result.revision,
                                         ssid: result.ssid ?? "",
                                         password: undefined,
                                     });
@@ -247,18 +238,6 @@ export function NetworkConfigPanel({
                                 Để trống để giữ mật khẩu đã lưu khi tên mạng không đổi. Mật khẩu
                                 không được đọc lại.
                             </p>
-                            {dirty && network!.revision !== form.getValues("revision") && (
-                                <p role="alert">
-                                    Có cấu hình mới từ người khác. Bản nháp vẫn được giữ.{" "}
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        onClick={() => form.setValue("revision", network!.revision)}
-                                    >
-                                        Dùng phiên bản mới để lưu bản nháp
-                                    </Button>
-                                </p>
-                            )}
                             <div className="actions">
                                 <Button disabled={form.formState.isSubmitting}>Lưu cấu hình</Button>
                                 <Button

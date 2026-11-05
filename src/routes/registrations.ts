@@ -124,12 +124,11 @@ export function registrationRoutes(app: App) {
                         "INSERT INTO transaction_guard SELECT count(*) FROM device_registrations WHERE registrationId=? AND state='CHALLENGE' AND expiresAt>=unixepoch('subsec')*1000 AND attempts<5"
                     ).bind(row.registrationId),
                     c.env.DB.prepare(
-                        "INSERT INTO devices(deviceId,name,siteId,doorId,scopeId,qrBaseUrl,generation,credentialHash,pairedAt,createdAt) VALUES(?,?,?,?,?,'',1,?,?,?)"
+                        "INSERT INTO devices(deviceId,name,siteId,scopeId,qrBaseUrl,generation,credentialHash,pairedAt,createdAt) VALUES(?,?,?,?,'',1,?,?,?)"
                     ).bind(
                         deviceId,
                         row.serial?.trim() || row.hardwareTarget,
                         row.siteId,
-                        deviceId,
                         row.scopeId,
                         await hash(token),
                         now,

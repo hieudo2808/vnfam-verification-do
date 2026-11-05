@@ -208,13 +208,14 @@ export class DeviceDO extends DurableObject<Env> {
     private targetGuard(
         d: DeviceRow,
         action: string,
-        payload: Record<string, unknown>
+        payload: Record<string, unknown>,
+        networkCipher: string | null
     ): D1PreparedStatement[] {
         if (action === "APPLY_CONFIG")
             return [
                 this.env.DB.prepare(
-                    "INSERT INTO transaction_guard SELECT count(*) FROM devices WHERE deviceId=? AND configRevision=?"
-                ).bind(d.deviceId, payload.revision),
+                    "INSERT INTO transaction_guard SELECT count(*) FROM devices d LEFT JOIN device_network_config n ON n.deviceId=d.deviceId WHERE d.deviceId=? AND d.scopeId=? AND d.qrBaseUrl=? AND n.ssid IS ? AND n.passwordCipher IS ?"
+                ).bind(d.deviceId, payload.scopeId, payload.qrBaseUrl, payload.wifiSsid ?? null, networkCipher),
             ];
         return action !== "UPGRADE_FIRMWARE"
             ? []
@@ -271,17 +272,18 @@ export class DeviceDO extends DurableObject<Env> {
             const now = Date.now(),
                 operationId = crypto.randomUUID();
             const payload: Record<string, unknown> = { previousBootId: d.bootId };
+            let networkCipher: string | null = null;
             if (action === "APPLY_CONFIG") {
                 Object.assign(payload, {
-                    revision: d.configRevision,
                     scopeId: d.scopeId,
                     qrBaseUrl: d.qrBaseUrl,
                 });
                 const network = await db(this.env)
-                    .prepare("SELECT ssid FROM device_network_config WHERE deviceId=?")
+                    .prepare("SELECT ssid,passwordCipher FROM device_network_config WHERE deviceId=?")
                     .bind(deviceId)
-                    .first<{ ssid: string }>();
+                    .first<{ ssid: string; passwordCipher: string }>();
                 if (network) {
+                    networkCipher = network.passwordCipher;
                     const status = await db(this.env)
                         .prepare(
                             "SELECT runtimeConfigVersion FROM device_runtime_status WHERE deviceId=? AND generation=? AND sessionId=?"
@@ -349,7 +351,7 @@ export class DeviceDO extends DurableObject<Env> {
                 await db(this.env).batch([
                     this.authorityGuard(d, this.attachment(ws).sessionId),
                     ...this.serviceGuard(principal, d),
-                    ...this.targetGuard(d, action, payload),
+                    ...this.targetGuard(d, action, payload, networkCipher),
                     claim(this.env, i, op, 202),
                     this.env.DB.prepare(
                         "INSERT INTO operations VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"
@@ -397,7 +399,7 @@ export class DeviceDO extends DurableObject<Env> {
             await db(this.env).batch([
                 this.authorityGuard(d, this.attachment(ws).sessionId),
                 ...this.serviceGuard(principal, d),
-                ...this.targetGuard(d, action, payload),
+                ...this.targetGuard(d, action, payload, networkCipher),
                 this.env.DB.prepare(
                     "UPDATE operations SET state='SENT' WHERE operationId=? AND state='CREATED'"
                 ).bind(operationId),
@@ -538,11 +540,9 @@ export class DeviceDO extends DurableObject<Env> {
                 if (!key) throw new ApiError(409, "KEY_NOT_TRUSTED");
                 if (m.type === "DEVICE_STATUS" && b.bootId !== a.bootId)
                     throw new ApiError(409, "BOOT_MISMATCH");
-                if (b.appliedRevision > d.configRevision)
-                    throw new ApiError(409, "REVISION_CONFLICT");
                 writes.push(
                     this.env.DB.prepare(
-                        "UPDATE devices SET bootId=?,hardwareTarget=?,firmwareVersion=?,buildId=?,otaSlotBytes=?,capabilities=?,appliedRevision=max(appliedRevision,?),reportedHealthy=?,lastSeenAt=?,confirmedAt=coalesce(confirmedAt,?) WHERE deviceId=? AND generation=? AND currentSession=?"
+                        "UPDATE devices SET bootId=?,hardwareTarget=?,firmwareVersion=?,buildId=?,otaSlotBytes=?,capabilities=?,reportedHealthy=?,lastSeenAt=?,confirmedAt=coalesce(confirmedAt,?) WHERE deviceId=? AND generation=? AND currentSession=?"
                     ).bind(
                         b.bootId,
                         b.hardwareTarget,
@@ -550,7 +550,6 @@ export class DeviceDO extends DurableObject<Env> {
                         b.buildId,
                         b.otaSlotBytes,
                         JSON.stringify(b.capabilities),
-                        b.appliedRevision,
                         Number(b.healthy),
                         Date.now(),
                         Date.now(),
@@ -626,12 +625,6 @@ export class DeviceDO extends DurableObject<Env> {
                     if (op.action === "REQUEST_STATUS" && m.payload.success)
                         throw new ApiError(409, "STATUS_REPORT_REQUIRED");
                     writes.push(...this.finishWrites(op, m.payload, d));
-                    if (op.action === "APPLY_CONFIG" && m.payload.success)
-                        writes.push(
-                            this.env.DB.prepare(
-                                "UPDATE devices SET appliedRevision=max(appliedRevision,?) WHERE deviceId=? AND generation=?"
-                            ).bind(m.payload.revision!, d.deviceId, d.generation)
-                        );
                 } else if (m.type === "KEY_PROPOSAL" || m.type === "KEY_ACTIVATED") {
                     if (
                         op.action !== "ROTATE_QR_KEY" ||

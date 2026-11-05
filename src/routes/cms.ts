@@ -134,44 +134,29 @@ export function cmsRoutes(app: App) {
             if (!r) throw new ApiError(404, "DEVICE_NOT_FOUND");
             const pairing = await db(c.env)
                 .prepare(
-                    "SELECT pairingId,generation,expiresAt,attempts,CASE WHEN state='PENDING' AND expiresAt<? THEN 'EXPIRED' ELSE state END state FROM pairings WHERE deviceId=? ORDER BY createdAt DESC,pairingId DESC LIMIT 1"
+                    "SELECT pairingId,expiresAt,CASE WHEN state='PENDING' AND expiresAt<? THEN 'EXPIRED' ELSE state END state FROM pairings WHERE deviceId=? ORDER BY createdAt DESC,pairingId DESC LIMIT 1"
                 )
                 .bind(Date.now(), d.deviceId)
                 .first();
-            const keys = await db(c.env)
-                .prepare(
-                    "SELECT keyId,publicKey,generation,state,createdAt FROM qr_keys WHERE deviceId=? ORDER BY createdAt DESC LIMIT 100"
-                )
-                .bind(d.deviceId)
-                .all();
             const ops = await db(c.env)
                 .prepare(
                     "SELECT o.*,p.percent _percent,p.updatedAt _updatedAt FROM operations o LEFT JOIN operation_progress p USING(operationId) WHERE o.deviceId=? ORDER BY o.createdAt DESC,o.operationId DESC LIMIT 10"
                 )
                 .bind(d.deviceId)
                 .all<OperationRow & { _percent: number | null; _updatedAt: number | null }>();
-            const synced = await db(c.env)
-                .prepare(
-                    "SELECT json_extract(result,'$.syncedAtMs') ts FROM operations WHERE deviceId=? AND generation=? AND action='SYNC_TIME' AND state='SUCCEEDED' ORDER BY createdAt DESC LIMIT 1"
-                )
+            const key = await db(c.env)
+                .prepare("SELECT keyId FROM qr_keys WHERE deviceId=? AND generation=? AND state='ACTIVE'")
                 .bind(d.deviceId, d.generation)
-                .first<{ ts: number }>();
+                .first<{ keyId: string }>();
             return c.json({
                 ...summary(r),
-                config: {
-                    revision: d.configRevision,
-                    scopeId: d.scopeId,
-                    qrBaseUrl: d.qrBaseUrl,
-                    appliedRevision: d.appliedRevision,
-                },
                 pairing,
-                keys: keys.results,
+                activeKeyId: key?.keyId ?? null,
                 recentOperations: ops.results.map(({ _percent, _updatedAt, ...op }) => ({
                     operation: publicOperation(op),
                     progress:
                         _percent === null ? null : { percent: _percent, updatedAt: _updatedAt },
                 })),
-                lastSyncedAtMs: synced?.ts ?? null,
                 serverTimeMs: Date.now(),
             });
         }

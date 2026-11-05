@@ -152,7 +152,7 @@ export function NewDevice() {
                 onSubmit={form.handleSubmit(async ({ name }) => {
                     if (!defaults) return;
                     try {
-                        const value = { ...defaults, deviceId, doorId: deviceId, name };
+                        const value = { ...defaults, deviceId, name };
                         const d = await intent.run(value, (key) =>
                             api.call("/devices", "POST", value, S.Device, key)
                         );
@@ -267,16 +267,10 @@ function Detail({ deviceId }: { deviceId: string }) {
                                     {!!error && <Problem error={error} />}
                                     <dl>
                                         <dt>Firmware</dt>
-                                        <dd>
-                                            {d.device.firmwareVersion ?? "Chưa có"} /{" "}
-                                            {d.device.buildId ?? "—"}
-                                        </dd>
-                                        <dt>Hardware / OTA slot</dt>
-                                        <dd>
-                                            {d.device.hardwareTarget ?? "—"} /{" "}
-                                            {d.device.otaSlotBytes ?? "—"} byte
-                                        </dd>
-                                        <dt>Kết nối xác nhận gần nhất</dt>
+                                        <dd>{d.device.firmwareVersion ?? "Chưa có"}</dd>
+                                        <dt>Hardware</dt>
+                                        <dd>{d.device.hardwareTarget ?? "-"}</dd>
+                                        <dt>Thời điểm xác nhận kết nối</dt>
                                         <dd>
                                             <Stamp value={d.device.confirmedAt} />
                                         </dd>
@@ -349,7 +343,7 @@ function DeleteDevice({ device }: { device: z.infer<typeof S.Device> }) {
             <Confirm
                 open={open}
                 title="Xóa thiết bị"
-                description={`${device.name} · ${device.deviceId} · ${device.siteId} / ${device.doorId}. Máy sẽ bị xóa khỏi danh sách, ngắt kết nối và không thể check-in. Lịch sử được giữ lại.`}
+                description={`${device.name} · ${device.deviceId}. Máy sẽ bị xóa khỏi danh sách, ngắt kết nối và không thể check-in. Lịch sử được giữ lại.`}
                 busy={busy}
                 onClose={() => setOpen(false)}
                 onConfirm={async () => {

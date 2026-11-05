@@ -80,10 +80,8 @@ export function deviceRoutes(app: App) {
                 deviceId: d.deviceId,
                 generation: d.generation,
                 config: {
-                    revision: d.configRevision,
                     scopeId: d.scopeId,
                     qrBaseUrl: d.qrBaseUrl,
-                    appliedRevision: d.appliedRevision,
                 },
                 firmwareTarget: d.firmwareTarget,
                 serverTimeMs: Date.now(),

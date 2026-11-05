@@ -11,6 +11,8 @@ Hệ thống quản lý các máy phát QR tại đầu vào bảo tàng. ESP32 
 
 Backend dùng TypeScript, Hono, Cloudflare Workers; D1 lưu dữ liệu, mỗi máy có một Durable Object quản lý kết nối/lệnh, R2 private chứa firmware. CMS dùng React/Vite và một Hono bridge gọi backend qua Service Binding. Service token chỉ nằm ở server.
 
+Tên thiết bị cũng là vị trí hiển thị cho người vận hành, ví dụ “Sảnh A, tầng 1”; không lưu thêm một trường vị trí riêng. Public key thiết bị chỉ dùng trong backend để kiểm tra chữ ký, không trả qua API tổng quan CMS.
+
 Bun quản lý dependency và chạy lệnh; Node chạy bên trong Wrangler và một số công cụ. Worker production chạy bằng workerd. Dự án không chứa mã firmware ESP32 hoặc hệ thống đăng nhập riêng; khi ghép vào CMS tổng, nối nguồn actor của bridge với người dùng đã được CMS xác thực.
 
 ## Cài và chạy local
@@ -184,7 +186,6 @@ Mở `wss://<api-host>/api/devices/<deviceId>/connection` với header `Authoriz
         "buildId": "build_01",
         "otaSlotBytes": 2097152,
         "capabilities": ["REQUEST_STATUS", "APPLY_CONFIG", "REBOOT", "UPGRADE_FIRMWARE"],
-        "appliedRevision": 0,
         "healthy": true,
         "runtimeConfigVersion": 1
     }
@@ -247,7 +248,7 @@ Module `src/checkin-verification.ts` export `ContractQrQuery`, `contractQrBytes`
 
 #### QR/API hiện có: giữ tương thích
 
-Đọc `GET /api/devices/:deviceId/desired-state` để lấy `config:{revision,scopeId,qrBaseUrl,appliedRevision}`, firmware target và operation đang đối chiếu. Đổi QR mỗi 30 giây:
+Đọc `GET /api/devices/:deviceId/desired-state` để lấy `config:{scopeId,qrBaseUrl}`, firmware target và operation đang đối chiếu. Đổi QR mỗi 30 giây:
 
 ```text
 issuedAtMs = floor(nowMs / 30000) * 30000
@@ -283,7 +284,7 @@ Server gửi `COMMAND` với `{operationId,payload:{action,deadline,parameters}}
 | Action             | Bằng chứng kết quả                                                          |
 | ------------------ | --------------------------------------------------------------------------- |
 | `REQUEST_STATUS`   | `DEVICE_STATUS` mới cùng operationId                                        |
-| `APPLY_CONFIG`     | Applied revision đúng; có Wi-Fi thì thêm runtimeConfigVersion/wifiSsid đúng |
+| `APPLY_CONFIG`     | Result thành công đúng operationId; có Wi-Fi thì runtimeConfigVersion/wifiSsid phải khớp |
 | `REBOOT`           | BOOT có bootId mới, sau đó result đối chiếu                                 |
 | `RESET_WIFI`       | Result có `wifiCleared:true`; mất socket không đủ                           |
 | `SCAN_WIFI`        | Result chứa scannedAtMs và wifiNetworks thực đo                             |
@@ -291,7 +292,9 @@ Server gửi `COMMAND` với `{operationId,payload:{action,deadline,parameters}}
 
 `UNKNOWN` nghĩa là chưa xác định kết quả, vẫn chặn lệnh xung đột. Khi reconnect, đọc `activeOperation` trong desired state và đối chiếu journal. Chỉ báo `NOT_EXECUTED` khi lưu bền chứng minh chưa chạy; không tự thực thi lại thao tác chưa rõ.
 
-Wi-Fi được CMS lưu và áp dụng riêng. Máy khai `runtimeConfigVersion:1`; `APPLY_CONFIG` không mang password. Tải `GET /api/devices/:deviceId/network-config?operationId=...` bằng token máy để nhận `{revision,ssid,password}` đúng operation. Giữ mạng cũ để khôi phục, chỉ báo thành công sau khi nối lại backend bằng mạng mới. Khai `SCAN_WIFI` khi có thể quét SSID/RSSI/bảo mật; kết quả theo `WifiScan` trong `src/contracts.ts`.
+Wi-Fi được CMS lưu và áp dụng riêng. Máy khai `runtimeConfigVersion:1`; `APPLY_CONFIG` không mang password. Tải `GET /api/devices/:deviceId/network-config?operationId=...` bằng token máy để nhận `{ssid,password}` đúng operation. Khi có lệnh `APPLY_CONFIG` đang chạy hoặc chưa rõ kết quả (`UNKNOWN`), không được sửa cấu hình cho đến khi lệnh được đối chiếu xong. Giữ mạng cũ để khôi phục, chỉ báo thành công sau khi nối lại backend bằng mạng mới. Khai `SCAN_WIFI` khi có thể quét SSID/RSSI/bảo mật; kết quả theo `WifiScan` trong `src/contracts.ts`.
+
+Theo điều chỉnh ngày 05/11/2026, cấu hình từng máy không còn số phiên bản đã lưu/đã áp dụng trong DB, HTTP hoặc bản tin WebSocket. Firmware nhận và xác nhận cấu hình theo `operationId`, không gửi các trường phiên bản cấu hình máy. Cài đặt SNTP dùng chung vẫn có `revision` để chống ghi đè nhầm.
 
 Nút local gửi `LOCAL_REQUEST` với `payload:{action:"APPLY_CONFIG"}` hoặc `UPGRADE_FIRMWARE`, rồi chờ `COMMAND`. Backend chọn cấu hình/firmware đã được cấp, không tự chọn bản mới nhất. Lưu cấu hình/gán target không tự flash.
 

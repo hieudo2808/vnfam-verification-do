@@ -23,7 +23,6 @@ export const TimeSettings = TimeSettingsInput.extend({
     timezone: Timezone,
 });
 export const NetworkInput = z.strictObject({
-    revision: z.number().int().positive(),
     ssid: z
         .string()
         .min(1)
@@ -40,8 +39,6 @@ export const NetworkInput = z.strictObject({
         .optional(),
 });
 export const NetworkConfig = z.strictObject({
-    revision: z.number().int().positive(),
-    appliedRevision: z.number().int().nonnegative(),
     ssid: z.string().nullable(),
     passwordConfigured: z.boolean(),
 });
@@ -58,7 +55,6 @@ export const RuntimeSettings = z.strictObject({
 });
 export const NetworkDownloadQuery = z.strictObject({ operationId: Id });
 export const NetworkDownload = z.strictObject({
-    revision: z.number().int().positive(),
     ssid: z.string(),
     password: z.string(),
 });

@@ -1,6 +1,6 @@
 import * as R from "../runtime-contracts";
 import { type App, endpoint, commit, changed, intent, replay, replayResponse } from "../http";
-import { ApiError, audit, db, device, grants, parse, type DeviceRow } from "../platform";
+import { ApiError, audit, configWriteGuard, db, device, grants, parse, type DeviceRow } from "../platform";
 import { b64, bytes, unb64 } from "../crypto";
 import { firmwarePrincipal } from "./devices";
 
@@ -53,8 +53,6 @@ async function network(env: Env, d: DeviceRow) {
         .bind(d.deviceId)
         .first<NetworkRow>();
     return {
-        revision: d.configRevision,
-        appliedRevision: d.appliedRevision,
         ssid: row?.ssid ?? null,
         passwordConfigured: !!row,
     };
@@ -181,7 +179,6 @@ export function runtimeSettingsRoutes(app: App) {
                 safeIntent = await protectedIntent(c.env, input),
                 old = await replay(c.env, await intent(c, action, safeIntent));
             if (old) return replayResponse(old);
-            if (input.revision !== d.configRevision) throw new ApiError(409, "REVISION_CONFLICT");
             const previous = await db(c.env)
                 .prepare("SELECT ssid,passwordCipher FROM device_network_config WHERE deviceId=?")
                 .bind(d.deviceId)
@@ -206,17 +203,12 @@ export function runtimeSettingsRoutes(app: App) {
                 c,
                 action,
                 safeIntent,
-                {
-                    revision: input.revision + 1,
-                    appliedRevision: d.appliedRevision,
-                    ssid: input.ssid,
-                    passwordConfigured: true,
-                },
+                { ssid: input.ssid, passwordConfigured: true },
                 [
+                    configWriteGuard(c.env, d.deviceId, d.generation),
                     c.env.DB.prepare(
-                        "UPDATE devices SET configRevision=configRevision+1 WHERE deviceId=? AND configRevision=? AND siteId=? AND scopeId=?"
-                    ).bind(d.deviceId, input.revision, d.siteId, d.scopeId),
-                    changed(c.env),
+                        "INSERT INTO transaction_guard SELECT count(*) FROM devices d LEFT JOIN device_network_config n ON n.deviceId=d.deviceId WHERE d.deviceId=? AND d.generation=? AND d.siteId=? AND d.scopeId=? AND d.deletedAt IS NULL AND n.ssid IS ? AND n.passwordCipher IS ?"
+                    ).bind(d.deviceId, d.generation, d.siteId, d.scopeId, previous?.ssid ?? null, previous?.passwordCipher ?? null),
                     c.env.DB.prepare(
                         "INSERT INTO device_network_config VALUES(?,?,?) ON CONFLICT(deviceId) DO UPDATE SET ssid=excluded.ssid,passwordCipher=excluded.passwordCipher"
                     ).bind(d.deviceId, input.ssid, cipher),
@@ -239,10 +231,10 @@ export function runtimeSettingsRoutes(app: App) {
                 q = parse(R.NetworkDownloadQuery, c.req.query());
             const row = await db(c.env)
                 .prepare(
-                    "SELECT n.ssid,n.passwordCipher,d.configRevision FROM devices d JOIN device_network_config n ON n.deviceId=d.deviceId JOIN operations o ON o.deviceId=d.deviceId AND o.generation=d.generation WHERE d.deviceId=? AND d.generation=? AND d.credentialHash=? AND o.operationId=? AND o.action='APPLY_CONFIG' AND o.state IN('SENT','ACKNOWLEDGED','RUNNING','UNKNOWN') AND json_extract(o.payload,'$.runtimeConfigVersion')=1 AND json_extract(o.payload,'$.revision')=d.configRevision AND json_extract(o.payload,'$.wifiSsid')=n.ssid"
+                    "SELECT n.ssid,n.passwordCipher FROM devices d JOIN device_network_config n ON n.deviceId=d.deviceId JOIN operations o ON o.deviceId=d.deviceId AND o.generation=d.generation WHERE d.deviceId=? AND d.generation=? AND d.credentialHash=? AND o.operationId=? AND o.action='APPLY_CONFIG' AND o.state IN('SENT','ACKNOWLEDGED','RUNNING','UNKNOWN') AND json_extract(o.payload,'$.runtimeConfigVersion')=1 AND json_extract(o.payload,'$.wifiSsid')=n.ssid"
                 )
                 .bind(d.deviceId, d.generation, d.credentialHash, q.operationId)
-                .first<NetworkRow & { configRevision: number }>();
+                .first<NetworkRow>();
             if (!row) throw new ApiError(409, "OPERATION_INVALID");
             const [iv, cipher] = row.passwordCipher.split(".");
             try {
@@ -256,7 +248,6 @@ export function runtimeSettingsRoutes(app: App) {
                     unb64(cipher!)
                 );
                 return c.json({
-                    revision: row.configRevision,
                     ssid: row.ssid,
                     password: new TextDecoder().decode(decrypted),
                 });

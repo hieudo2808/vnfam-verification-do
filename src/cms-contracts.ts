@@ -25,26 +25,15 @@ export const Progress = z.strictObject({
 });
 export const PairingMeta = z.strictObject({
     pairingId: S.Id,
-    generation: z.number().int(),
     expiresAt: S.Time,
-    attempts: z.number().int(),
     state: z.enum(["PENDING", "CONSUMED", "CANCELLED", "LOCKED", "EXPIRED"]),
 });
-export const KeyMeta = z.strictObject({
-    keyId: S.PublicKey,
-    publicKey: S.DevicePublicKey,
-    generation: z.number().int(),
-    state: z.enum(["ACTIVE", "PENDING", "REVOKED"]),
-    createdAt: S.Time,
-});
 export const Overview = Summary.extend({
-    config: S.Config,
     pairing: PairingMeta.nullable(),
-    keys: z.array(KeyMeta),
+    activeKeyId: S.PublicKey.nullable(),
     recentOperations: z.array(
         z.strictObject({ operation: S.Operation, progress: Progress.nullable() })
     ),
-    lastSyncedAtMs: S.Time.nullable(),
     serverTimeMs: S.Time,
 });
 export const DeviceQuery = S.PageQuery.extend({

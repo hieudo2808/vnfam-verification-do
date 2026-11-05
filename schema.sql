@@ -4,10 +4,10 @@ CREATE TABLE service_credentials (
  scopes TEXT NOT NULL CHECK(json_valid(scopes)), revokedAt INTEGER, createdAt INTEGER NOT NULL
 );
 CREATE TABLE devices (
- deviceId TEXT PRIMARY KEY, name TEXT NOT NULL, siteId TEXT NOT NULL, doorId TEXT NOT NULL, scopeId TEXT NOT NULL,
+ deviceId TEXT PRIMARY KEY, name TEXT NOT NULL, siteId TEXT NOT NULL, scopeId TEXT NOT NULL,
  checkInEnabled INTEGER NOT NULL DEFAULT 1 CHECK(checkInEnabled IN(0,1)), generation INTEGER NOT NULL DEFAULT 0,
- credentialHash TEXT UNIQUE, pairedAt INTEGER, confirmedAt INTEGER, configRevision INTEGER NOT NULL DEFAULT 1,
- qrBaseUrl TEXT NOT NULL, appliedRevision INTEGER NOT NULL DEFAULT 0, firmwareTarget TEXT,
+ credentialHash TEXT UNIQUE, pairedAt INTEGER, confirmedAt INTEGER,
+ qrBaseUrl TEXT NOT NULL, firmwareTarget TEXT,
  bootId TEXT, currentSession TEXT, sessionEpoch INTEGER NOT NULL DEFAULT 0, hardwareTarget TEXT, firmwareVersion TEXT, buildId TEXT, otaSlotBytes INTEGER, reportedHealthy INTEGER NOT NULL DEFAULT 0,
  capabilities TEXT NOT NULL DEFAULT '[]', lastSeenAt INTEGER, createdAt INTEGER NOT NULL, deletedAt INTEGER
 );

@@ -56,34 +56,23 @@ export const DeviceInput = z.strictObject({
     deviceId: Id,
     name: z.string().min(1).max(200),
     siteId: Id,
-    doorId: Id,
     scopeId: Id,
     qrBaseUrl: QrDestination.default(""),
 });
 export const DevicePatch = z.strictObject({
     name: z.string().min(1).max(200).optional(),
     siteId: Id.optional(),
-    doorId: Id.optional(),
     checkInEnabled: z.boolean().optional(),
 });
-export const ConfigInput = z.strictObject({
-    revision: z.number().int().positive(),
-    scopeId: Id,
-    qrBaseUrl: QrDestination,
-});
 export const Config = z.strictObject({
-    revision: z.number().int().positive(),
     scopeId: Id,
     qrBaseUrl: QrDestination,
-    appliedRevision: z.number().int().nonnegative(),
 });
 export const Device = DeviceInput.extend({
     checkInEnabled: z.boolean(),
     generation: z.number().int(),
     pairedAt: Time.nullable(),
     confirmedAt: Time.nullable(),
-    configRevision: z.number().int(),
-    appliedRevision: z.number().int(),
     firmwareTarget: Id.nullable(),
     bootId: Id.nullable(),
     hardwareTarget: Id.nullable(),
@@ -214,7 +203,6 @@ export const Result = z.strictObject({
     success: z.boolean(),
     reason: Id.optional(),
     bootId: Id.optional(),
-    revision: z.number().int().positive().optional(),
     buildId: Id.optional(),
     healthy: z.boolean().optional(),
     syncedAtMs: Time.optional(),
@@ -226,7 +214,6 @@ export const Result = z.strictObject({
 });
 export const TimeReport = z.strictObject({
     server: z.string().min(1).max(253),
-    configRevision: z.number().int().positive(),
     deviceTimeMs: Time,
     syncedAtMs: Time.nullable(),
     status: z.enum(["SYNCED", "UNSYNCED", "ERROR"]),
@@ -243,7 +230,6 @@ export const Boot = z.strictObject({
         .positive()
         .max(8 * 1024 * 1024),
     capabilities: z.array(Action).max(Action.options.length),
-    appliedRevision: z.number().int().nonnegative(),
     healthy: z.boolean(),
     runtimeConfigVersion: z.literal(1).optional(),
     wifiSsid: z.string().max(32).optional(),
@@ -333,7 +319,6 @@ export const Release = Manifest.extend({
 export const ReleasePatch = z.strictObject({ state: z.enum(["APPROVED", "REVOKED"]) });
 export const TargetInput = z.strictObject({ releaseId: Id });
 export const RevokeKeyInput = z.strictObject({ keyId: PublicKey });
-export const Empty = z.strictObject({});
 export const Ok = z.strictObject({ ok: z.literal(true) });
 export const ErrorBody = z.object({
     error: z.object({ code: z.string(), message: z.string(), requestId: z.string() }),

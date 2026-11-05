@@ -1,6 +1,6 @@
 import * as S from "../contracts";
 import { type App, endpoint, commit, changed, intent, replay, replayResponse } from "../http";
-import { ApiError, audit, db, device, grants, publicDevice, parse, rateLimit } from "../platform";
+import { ApiError, audit, db, device, grants, publicDevice, parse, rateLimit, configWriteGuard } from "../platform";
 import { hash, randomToken, unb64, verifyDeviceSignature, pairingBytes } from "../crypto";
 
 export function registryRoutes(app: App) {
@@ -24,8 +24,6 @@ export function registryRoutes(app: App) {
                 generation: 0,
                 pairedAt: null,
                 confirmedAt: null,
-                configRevision: 1,
-                appliedRevision: 0,
                 firmwareTarget: null,
                 bootId: null,
                 hardwareTarget: null,
@@ -43,12 +41,11 @@ export function registryRoutes(app: App) {
                 response,
                 [
                     c.env.DB.prepare(
-                        "INSERT INTO devices(deviceId,name,siteId,doorId,scopeId,qrBaseUrl,createdAt) VALUES(?,?,?,?,?,?,?)"
+                        "INSERT INTO devices(deviceId,name,siteId,scopeId,qrBaseUrl,createdAt) VALUES(?,?,?,?,?,?)"
                     ).bind(
                         input.deviceId,
                         input.name,
                         input.siteId,
-                        input.doorId,
                         input.scopeId,
                         input.qrBaseUrl,
                         createdAt
@@ -173,11 +170,10 @@ export function registryRoutes(app: App) {
                 { ...publicDevice(d), ...input },
                 [
                     c.env.DB.prepare(
-                        "UPDATE devices SET name=?,siteId=?,doorId=?,checkInEnabled=? WHERE deviceId=? AND siteId=? AND scopeId=? AND name=? AND doorId=? AND checkInEnabled=?"
+                        "UPDATE devices SET name=?,siteId=?,checkInEnabled=? WHERE deviceId=? AND siteId=? AND scopeId=? AND name=? AND checkInEnabled=?"
                     ).bind(
                         input.name ?? d.name,
                         input.siteId ?? d.siteId,
-                        input.doorId ?? d.doorId,
                         input.checkInEnabled === undefined
                             ? d.checkInEnabled
                             : Number(input.checkInEnabled),
@@ -185,7 +181,6 @@ export function registryRoutes(app: App) {
                         d.siteId,
                         d.scopeId,
                         d.name,
-                        d.doorId,
                         d.checkInEnabled
                     ),
                     changed(c.env),
@@ -201,16 +196,14 @@ export function registryRoutes(app: App) {
             path: "/api/admin/devices/{deviceId}/config",
             permission: "devices:read",
             output: S.Config,
-            summary: "Read desired versus applied config",
+            summary: "Read saved device settings",
         },
         async (c) => {
             const d = await device(c.env, c.req.param("deviceId")!);
             grants(c.get("principal"), d.siteId, d.scopeId);
             return c.json({
-                revision: d.configRevision,
                 scopeId: d.scopeId,
                 qrBaseUrl: d.qrBaseUrl,
-                appliedRevision: d.appliedRevision,
             });
         }
     );
@@ -220,9 +213,9 @@ export function registryRoutes(app: App) {
             method: "patch",
             path: "/api/admin/devices/{deviceId}/config",
             permission: "devices:write",
-            input: S.ConfigInput,
+            input: S.Config,
             output: S.Config,
-            summary: "Optimistic config revision edit",
+            summary: "Save device settings when no apply operation is active",
         },
         async (c, input) => {
             const d = await device(c.env, c.req.param("deviceId")!),
@@ -232,16 +225,16 @@ export function registryRoutes(app: App) {
             const i = await intent(c, `config:${d.deviceId}`, input),
                 old = await replay(c.env, i);
             if (old) return replayResponse(old);
-            if (input.revision !== d.configRevision) throw new ApiError(409, "REVISION_CONFLICT");
             return commit(
                 c,
                 i.action,
                 input,
-                { ...input, revision: input.revision + 1, appliedRevision: d.appliedRevision },
+                input,
                 [
+                    configWriteGuard(c.env, d.deviceId, d.generation),
                     c.env.DB.prepare(
-                        "UPDATE devices SET scopeId=?,qrBaseUrl=?,configRevision=configRevision+1 WHERE deviceId=? AND configRevision=? AND siteId=?"
-                    ).bind(input.scopeId, input.qrBaseUrl, d.deviceId, input.revision, d.siteId),
+                        "UPDATE devices SET scopeId=?,qrBaseUrl=? WHERE deviceId=? AND generation=? AND siteId=? AND scopeId=? AND qrBaseUrl=? AND deletedAt IS NULL"
+                    ).bind(input.scopeId, input.qrBaseUrl, d.deviceId, d.generation, d.siteId, d.scopeId, d.qrBaseUrl),
                     changed(c.env),
                     audit(c.env, p, c.get("actorId"), "CONFIG_DESIRED", d),
                 ]
@@ -399,7 +392,7 @@ export function registryRoutes(app: App) {
                         "UPDATE qr_keys SET state='REVOKED' WHERE deviceId=? AND state!='REVOKED'"
                     ).bind(p.deviceId),
                     c.env.DB.prepare(
-                        "UPDATE devices SET generation=?,credentialHash=?,pairedAt=?,confirmedAt=NULL,appliedRevision=0 WHERE deviceId=? AND generation=? AND deletedAt IS NULL"
+                        "UPDATE devices SET generation=?,credentialHash=?,pairedAt=?,confirmedAt=NULL WHERE deviceId=? AND generation=? AND deletedAt IS NULL"
                     ).bind(p.generation, await hash(token), now, p.deviceId, p.generation - 1),
                     changed(c.env),
                     c.env.DB.prepare(
@@ -475,8 +468,8 @@ export function registryRoutes(app: App) {
             grants(c.get("principal"), d.siteId, d.scopeId);
             return commit(c, `key:revoke:${d.deviceId}`, input, { ok: true }, [
                 c.env.DB.prepare(
-                    "UPDATE qr_keys SET state='REVOKED' WHERE keyId=? AND deviceId=? AND EXISTS(SELECT 1 FROM devices WHERE deviceId=? AND siteId=? AND scopeId=?)"
-                ).bind(input.keyId, d.deviceId, d.deviceId, d.siteId, d.scopeId),
+                    "UPDATE qr_keys SET state='REVOKED' WHERE keyId=? AND deviceId=? AND generation=? AND state='ACTIVE' AND EXISTS(SELECT 1 FROM devices WHERE deviceId=? AND generation=? AND siteId=? AND scopeId=? AND deletedAt IS NULL)"
+                ).bind(input.keyId, d.deviceId, d.generation, d.deviceId, d.generation, d.siteId, d.scopeId),
                 changed(c.env),
                 audit(c.env, c.get("principal"), c.get("actorId"), "QR_KEY_REVOKED", d),
             ]);

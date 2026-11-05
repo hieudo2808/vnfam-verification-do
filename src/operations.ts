@@ -20,9 +20,8 @@ export function resultState(
             break;
         case "APPLY_CONFIG":
             evidence =
-                result.revision === p.revision &&
-                (p.runtimeConfigVersion !== 1 ||
-                    (result.runtimeConfigVersion === 1 && result.wifiSsid === p.wifiSsid));
+                p.runtimeConfigVersion !== 1 ||
+                (result.runtimeConfigVersion === 1 && result.wifiSsid === p.wifiSsid);
             break;
         case "REBOOT":
             evidence = Boolean(

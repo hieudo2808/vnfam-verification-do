@@ -26,13 +26,10 @@ export const BridgeContext = C.Context.extend({
     policyEditable: z.boolean(),
     deviceDefaults: C.DeviceDefaults.nullable().default(null),
 });
-export type ArtifactFile = { releaseId: string; file: File };
 export type PairingSecret = { pairing: z.infer<typeof Pairing>; expiresAtClientMs: number };
 export const ModuleContext = createContext<{
     api: Api;
     portal: HTMLElement | null;
-    artifact?: ArtifactFile | null;
-    setArtifact?: (value: ArtifactFile | null) => void;
     pairingSecrets?: Record<string, PairingSecret>;
     setPairingSecrets?: Dispatch<SetStateAction<Record<string, PairingSecret>>>;
 }>({

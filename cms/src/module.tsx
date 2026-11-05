@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Routes, Route, NavLink, Navigate, Outlet, useParams } from "react-router";
+import { Routes, Route, NavLink, Navigate, Outlet } from "react-router";
 import { Monitor, History, ClipboardCheck, Settings } from "lucide-react";
 import { Api } from "./client";
-import { ModuleContext, type ArtifactFile, type PairingSecret } from "./shared";
+import { ModuleContext, type PairingSecret } from "./shared";
 import { Devices, NewDevice, DeviceDetail } from "./devices";
 import { Firmware, FirmwareDetail } from "./firmware";
 import { HistoryTable, Policy } from "./history";
@@ -29,7 +29,6 @@ export function DeviceAdminModule({
                 })
         ),
         [portal, setPortal] = useState<HTMLDivElement | null>(null),
-        [artifact, setArtifact] = useState<ArtifactFile | null>(null),
         [pairingSecrets, setPairingSecrets] = useState<Record<string, PairingSecret>>({}),
         api = useMemo(() => new Api(apiBaseUrl), [apiBaseUrl]);
     useEffect(() => {
@@ -53,7 +52,7 @@ export function DeviceAdminModule({
     return (
         <QueryClientProvider client={client}>
             <ModuleContext.Provider
-                value={{ api, portal, artifact, setArtifact, pairingSecrets, setPairingSecrets }}
+                value={{ api, portal, pairingSecrets, setPairingSecrets }}
             >
                 <div className="vnfam-admin" style={theme}>
                     <header>
@@ -96,28 +95,12 @@ export function DeviceAdminModule({
                                     <Route path="time" element={<TimeSettingsPage />} />
                                 </Route>
                                 <Route
-                                    path="firmware"
-                                    element={<Navigate to={base + "/settings/firmware"} replace />}
-                                />
-                                <Route
-                                    path="firmware/:releaseId"
-                                    element={<LegacyRelease base={base} />}
-                                />
-                                <Route
                                     path="check-ins"
                                     element={<HistoryTable kind="check-ins" />}
                                 />
                                 <Route
                                     path="audit"
                                     element={<HistoryTable kind="audit-events" />}
-                                />
-                                <Route
-                                    path="policy"
-                                    element={<Navigate to={base + "/settings/policy"} replace />}
-                                />
-                                <Route
-                                    path="time"
-                                    element={<Navigate to={base + "/settings/time"} replace />}
                                 />
                                 <Route
                                     path="*"
@@ -131,10 +114,6 @@ export function DeviceAdminModule({
             </ModuleContext.Provider>
         </QueryClientProvider>
     );
-}
-function LegacyRelease({ base }: { base: string }) {
-    const { releaseId } = useParams();
-    return <Navigate to={base + "/settings/firmware/" + releaseId} replace />;
 }
 function SettingsLayout() {
     return (
